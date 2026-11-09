@@ -1,0 +1,6 @@
+{
+  "name": "Bolso+",
+  "description": "Sistema inteligente de gestão financeira com análise emocional, consultoria por IA e controle avançado de dinheiro emprestado com análise de risco.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

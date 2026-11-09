@@ -1,0 +1,556 @@
+import React, { useState } from "react";
+import {   
+  Plus, 
+  Target, 
+  TrendingUp, 
+  TrendingDown, 
+  History, 
+  Settings, 
+  Trash2, 
+  ChevronRight, 
+  Wallet, 
+  AlertCircle,
+  CheckCircle2,
+  ArrowRightLeft,
+  Calendar,
+  Sparkles,
+  Info,
+  PiggyBank as PiggyIcon,
+  X,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Zap
+, ArrowLeft, Minus, MoreHorizontal, Bell, Edit2 , ArrowDown, ArrowUp } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { usePiggyBanks } from "../context/PiggyBankContext";
+import { useContas } from "../context/ContasContext";
+import { PiggyBank, PiggyBankHistory } from "../types";
+import { cn, formatCurrency } from "../lib/utils";
+
+
+
+function PiggyBankActionModal({ isOpen, onClose, bank, type, accounts, onConfirm }: any) {
+  const [value, setValue] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [description, setDescription] = useState("");
+
+  const isAdd = type === "add";
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-primary-dark/60 backdrop-blur-md">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="bg-white w-full max-w-md rounded-[48px] p-10 shadow-2xl relative overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <div className={cn(
+              "w-12 h-12 rounded-2xl flex items-center justify-center text-white",
+              bank.color
+            )}>
+              <span className="text-xl">{bank.icon}</span>
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-primary-dark tracking-tighter">
+                {isAdd ? "Guardar" : "Resgatar"}
+              </h2>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{bank.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 rounded-full bg-gray-50 text-gray-400 hover:text-primary-dark transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-4">Valor (R$)</label>
+            <div className="relative">
+              <input 
+                type="text" inputMode="decimal"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                placeholder="0,00"
+                className="w-full px-8 py-6 rounded-[32px] bg-gray-50 border-none focus:ring-4 focus:ring-primary-lime/20 font-black text-3xl text-primary-dark"
+              />
+              <div className={cn(
+                "absolute right-6 top-1/2 -translate-y-1/2 p-2 rounded-xl",
+                isAdd ? "bg-primary-green/10 text-primary-green" : "bg-rose-500/10 text-rose-500"
+              )}>
+                {isAdd ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-4">
+              {isAdd ? "Origem (Opcional)" : "Destino (Opcional)"}
+            </label>
+            <select 
+              value={accountId}
+              onChange={e => setAccountId(e.target.value)}
+              className="w-full px-6 py-4 rounded-3xl bg-gray-50 border-none focus:ring-2 focus:ring-primary-lime/50 font-bold text-primary-dark text-sm appearance-none"
+            >
+              <option value="">Apenas registro manual</option>
+              {accounts.map((acc: any) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({formatCurrency(acc.balance)})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-4">Descrição</label>
+            <input 
+              type="text" 
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Ex: Sobra do mês"
+              className="w-full px-6 py-4 rounded-3xl bg-gray-50 border-none focus:ring-2 focus:ring-primary-lime/50 font-bold text-primary-dark text-sm"
+            />
+          </div>
+
+          {isAdd && accountId && (
+            <div className="p-4 rounded-2xl bg-primary-lime/5 border border-primary-lime/10 flex items-start gap-3">
+              <Info size={14} className="text-primary-lime mt-0.5" />
+              <p className="text-[10px] font-medium text-gray-500 leading-relaxed">
+                Ao selecionar uma conta, o valor será deduzido do saldo e registrado como uma transferência interna.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <button 
+          onClick={() => onConfirm(parseFloat(value.toString().replace(/\./g, "").replace(",", ".")), accountId, description)}
+          disabled={!value || parseFloat(value.toString().replace(/\./g, "").replace(",", ".")) <= 0}
+          className={cn(
+            "w-full mt-10 py-5 rounded-[32px] font-black text-lg shadow-2xl transition-all active:scale-95 disabled:opacity-50",
+            isAdd 
+              ? "bg-primary-dark text-white shadow-primary-dark/20" 
+              : "bg-white border-2 border-primary-dark text-primary-dark shadow-gray-200/50"
+          )}
+        >
+          Confirmar {isAdd ? "Depósito" : "Resgate"}
+        </button>
+      </motion.div>
+    </div>
+  );
+}
+
+
+function CreatePiggyBankModal({ isOpen, onClose, initialData, onSave, onDelete }: any) {
+  const [name, setName] = React.useState(initialData?.name || "");
+  const [targetValue, setTargetValue] = React.useState(initialData?.targetValue?.toString() || "");
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-primary-dark/60 backdrop-blur-md">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white w-full max-w-md rounded-[40px] p-8 shadow-2xl relative"
+      >
+        <button 
+          onClick={onClose}
+          className="absolute top-6 right-6 w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <X size={20} />
+        </button>
+
+        <div className="w-16 h-16 rounded-[24px] bg-emerald-50 text-emerald-500 flex items-center justify-center mb-6">
+          <Target size={32} strokeWidth={2.5} />
+        </div>
+
+        <h2 className="text-2xl font-black text-primary-dark tracking-tight mb-2">
+          {initialData ? "Editar Cofrinho" : "Novo Cofrinho"}
+        </h2>
+        <p className="text-gray-500 text-sm font-medium mb-8">Defina um nome e um valor para o seu objetivo.</p>
+
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-4">Nome do Objetivo</label>
+            <input 
+              type="text" 
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Ex: Viagem para Europa"
+              className="w-full px-6 py-4 rounded-3xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500/50 font-bold text-primary-dark text-sm"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-4">Valor Alvo (R$)</label>
+            <input 
+              type="text" inputMode="decimal"
+              value={targetValue}
+              onChange={e => setTargetValue(e.target.value)}
+              placeholder="0,00"
+              className="w-full px-6 py-4 rounded-3xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500/50 font-bold text-primary-dark text-sm"
+            />
+          </div>
+        </div>
+
+        <div className="mt-10 space-y-3">
+          <button 
+            onClick={() => onSave({ 
+              name, 
+              targetValue: (parseFloat(targetValue.toString().replace(/\./g, "").replace(",", ".")) || 0),
+              currentValue: initialData?.currentValue || 0,
+              icon: initialData?.icon || '💰',
+              color: initialData?.color || 'bg-[#0B8A46]',
+              status: initialData?.status || 'active',
+              autoSave: initialData?.autoSave || false
+            })}
+            disabled={!name || !targetValue}
+            className="w-full py-5 rounded-[32px] bg-emerald-600 text-white font-black text-lg shadow-2xl shadow-emerald-600/20 transition-all active:scale-95 disabled:opacity-50"
+          >
+            Salvar
+          </button>
+          
+          {initialData && (
+            <button 
+              onClick={onDelete}
+              className="w-full py-5 rounded-[32px] bg-rose-50 text-rose-500 font-bold text-sm transition-all active:scale-95"
+            >
+              Excluir Cofrinho
+            </button>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function PiggyBankHistoryModal({ isOpen, onClose, bank }: any) {
+  const history = [...(bank.history || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-primary-dark/60 backdrop-blur-md">
+      <motion.div 
+        initial={{ opacity: 0, y: 100 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 100 }}
+        className="bg-white w-full h-[90vh] md:h-auto md:max-h-[80vh] md:max-w-md rounded-t-[40px] md:rounded-[40px] p-6 flex flex-col fixed bottom-0 md:relative"
+      >
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Histórico</h2>
+            <p className="text-sm font-medium text-slate-500">{bank.name}</p>
+          </div>
+          <button 
+            onClick={onClose}
+            className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4">
+          {history.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40">
+              <History size={32} className="text-gray-300 mb-2" />
+              <p className="text-sm font-medium text-gray-400">Nenhuma movimentação</p>
+            </div>
+          ) : (
+            history.map((item: any) => (
+              <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-3xl">
+                <div className="flex items-center gap-4">
+                  <div className={cn(
+                    "w-12 h-12 rounded-[20px] flex items-center justify-center",
+                    item.type === "in" ? "bg-[#E8F5E9] text-[#0B8A46]" : "bg-rose-50 text-rose-500"
+                  )}>
+                    {item.type === "in" ? <ArrowDown size={24} strokeWidth={2.5} /> : <ArrowUp size={24} strokeWidth={2.5} />}
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-900">{item.type === "in" ? "Depósito" : "Retirada"}</p>
+                    <p className="text-xs font-medium text-slate-500">
+                      {new Date(item.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '').replace(' de ', ' de ').replace(/ de (d{4})/, ', $1')}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className={cn(
+                    "font-bold text-base",
+                    item.type === "in" ? "text-[#0B8A46]" : "text-rose-500"
+                  )}>
+                    {item.type === "in" ? "+" : "-"} {formatCurrency(item.value)}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+
+export default function PiggyBanks() {
+  const { piggyBanks, loading, createPiggyBank, updatePiggyBank, deletePiggyBank, addMoney, withdrawMoney } = usePiggyBanks();
+  const { accounts } = useContas();
+
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [selectedBank, setSelectedBank] = useState<PiggyBank | null>(null);
+  const [isActionModalOpen, setIsActionModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [actionType, setActionType] = useState<"add" | "withdraw">("add");
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary-lime border-t-transparent" />
+      </div>
+    );
+  }
+
+  const bank = selectedBank || piggyBanks[0];
+  const progress = bank ? (bank.targetValue > 0 ? (bank.currentValue / bank.targetValue) * 100 : 0) : 0;
+  const history = bank ? [...(bank.history || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [];
+
+  return (
+    <div className="min-h-screen w-full font-sans text-slate-800 bg-[#F4F9F6] sm:bg-[#F8F9FA] pb-8 relative overflow-y-auto custom-scrollbar">
+      {/* Modals */}
+      <AnimatePresence>
+        {isCreateModalOpen && (
+          <CreatePiggyBankModal 
+            isOpen={isCreateModalOpen} 
+            onClose={() => {
+              setIsCreateModalOpen(false);
+              setSelectedBank(null);
+            }} 
+            initialData={selectedBank}
+            onSave={async (data) => {
+              if (selectedBank) {
+                const res = await updatePiggyBank(selectedBank.id, data); if (!res) { alert("Erro ao editar cofrinho. Verifique os dados."); return; }
+              } else {
+                console.log("Creating with data:", data); const res = await createPiggyBank(data); if (!res) { alert("Erro ao criar cofrinho. Verifique os dados. Dados tentados: " + JSON.stringify(data)); return; }
+              }
+              setIsCreateModalOpen(false);
+              setSelectedBank(null);
+            }}
+            onDelete={async () => {
+              if (selectedBank && confirm("Deseja realmente excluir este cofrinho?")) {
+                await deletePiggyBank(selectedBank.id);
+                setIsCreateModalOpen(false);
+                setSelectedBank(null);
+              }
+            }}
+          />
+        )}
+
+        {isActionModalOpen && selectedBank && (
+          <PiggyBankActionModal 
+            isOpen={isActionModalOpen}
+            onClose={() => {
+              setIsActionModalOpen(false);
+              setSelectedBank(null);
+            }}
+            bank={selectedBank}
+            type={actionType}
+            accounts={accounts}
+            onConfirm={async (value, accountId, description) => {
+              let success = false;
+              if (actionType === "add") {
+                success = await addMoney(selectedBank.id, value, accountId, description);
+              } else {
+                success = await withdrawMoney(selectedBank.id, value, accountId, description);
+              }
+              if (!success) { alert("Ocorreu um erro ao processar a operação."); return; }
+              setIsActionModalOpen(false);
+              setSelectedBank(null);
+            }}
+          />
+        )}
+
+        {isHistoryModalOpen && selectedBank && (
+          <PiggyBankHistoryModal 
+            isOpen={isHistoryModalOpen}
+            onClose={() => {
+              setIsHistoryModalOpen(false);
+              setSelectedBank(null);
+            }}
+            bank={selectedBank}
+          />
+        )}
+      </AnimatePresence>
+
+      {!bank ? (
+        <div className="flex flex-col items-center justify-center pt-32 px-6">
+          <div className="w-24 h-24 rounded-[40px] bg-white flex items-center justify-center text-gray-300 shadow-sm mb-6">
+            <PiggyIcon size={48} />
+          </div>
+          <h3 className="text-xl font-bold text-slate-800 mb-2">Nenhum cofrinho criado</h3>
+          <p className="text-slate-500 text-center mb-8">Comece a guardar dinheiro para seus sonhos.</p>
+          <button 
+            onClick={() => setIsCreateModalOpen(true)}
+            className="bg-[#0B8A46]0 text-white px-8 py-4 rounded-3xl font-bold shadow-lg shadow-[#0B8A46]0/20 active:scale-95 transition-all"
+          >
+            Criar meu primeiro cofrinho
+          </button>
+        </div>
+      ) : (
+        <div className="max-w-2xl mx-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 pt-[max(env(safe-area-inset-top,1.5rem),1.5rem)] pb-4 sticky top-0 z-10 bg-[#F4F9F6] sm:bg-[#F8F9FA]">
+            <div className="flex items-center gap-4">
+              <button onClick={() => window.history.back()} className="p-2 -ml-2 rounded-xl active:scale-95 transition-transform">
+                <ArrowLeft size={24} className="text-slate-900" />
+              </button>
+              <h1 className="text-[19px] font-bold text-slate-900">Cofrinho</h1>
+            </div>
+            <div className="flex items-center gap-2 text-slate-900">
+              <button className="p-2 relative active:scale-95 transition-transform">
+                <Bell size={22} />
+                <span className="absolute top-2 right-2 w-2 h-2 bg-emerald-500 rounded-full border border-white"></span>
+              </button>
+              <button className="p-2 active:scale-95 transition-transform">
+                <MoreHorizontal size={22} />
+              </button>
+            </div>
+          </div>
+
+          {/* Main Piggy Bank Card */}
+          <div className="mx-4 mt-2 mb-6 bg-white rounded-[28px] shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-6 relative">
+            <button 
+              onClick={() => { setSelectedBank(bank); setIsCreateModalOpen(true); }} 
+              className="absolute top-4 right-4 w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-[#0B8A46] hover:bg-emerald-100 transition-colors"
+            >
+              <Edit2 size={18} strokeWidth={2.5} />
+            </button>
+            
+            
+            <div className="flex pt-2">
+              <div className="w-[48%] flex items-center justify-center -ml-6 relative">
+                <img 
+                  src="https://cdn3d.iconscout.com/3d/premium/thumb/piggy-bank-4993437-4161109.png" 
+                  alt="Piggy Bank" 
+                  className="w-[180px] h-[180px] object-contain drop-shadow-xl z-10" 
+                  onError={(e) => {
+                    // Fallback se a imagem não existir
+                    e.currentTarget.src = "https://cdn3d.iconscout.com/3d/premium/thumb/piggy-bank-4993437-4161109.png";
+                  }}
+                />
+              </div>
+              <div className="w-[52%] flex flex-col justify-center pl-0 pr-2 space-y-4">
+                <div>
+                  <p className="text-[13px] font-medium text-slate-500 mb-1">Saldo atual</p>
+                  <p className="text-[32px] font-bold text-[#0B8A46] tracking-tight leading-none">{formatCurrency(bank.currentValue)}</p>
+                </div>
+                <div className="w-full h-[1px] bg-gray-100"></div>
+                <div>
+                  <p className="text-[13px] font-medium text-slate-500 mb-1">Objetivo</p>
+                  <p className="text-[17px] font-bold text-slate-900 tracking-tight leading-none">{formatCurrency(bank.targetValue)}</p>
+                </div>
+                <div className="w-full h-[1px] bg-gray-100"></div>
+                <div>
+                  <p className="text-[13px] font-medium text-slate-500 mb-2">Progresso</p>
+                  <p className="text-[22px] font-bold text-[#0B8A46] leading-none mb-2">{Math.round(progress)}%</p>
+                  <div className="w-full bg-gray-200 h-2.5 rounded-full overflow-hidden">
+                    <div style={{ width: `${Math.min(progress, 100)}%` }} className="h-full bg-[#0B8A46] rounded-full"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="px-4 space-y-3 mb-6">
+            <button 
+              onClick={() => { setSelectedBank(bank); setActionType("add"); setIsActionModalOpen(true); }} 
+              className="w-full bg-white rounded-[24px] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex items-center justify-between active:scale-95 transition-transform"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-full bg-emerald-50 text-[#0B8A46] flex items-center justify-center">
+                  <Plus size={20} strokeWidth={3} />
+                </div>
+                <span className="font-bold text-[#0B8A46] text-[15px]">Adicionar dinheiro</span>
+              </div>
+              <ChevronRight size={20} className="text-gray-400" />
+            </button>
+
+            <button 
+              onClick={() => { setSelectedBank(bank); setActionType("withdraw"); setIsActionModalOpen(true); }} 
+              className="w-full bg-white rounded-[24px] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex items-center justify-between active:scale-95 transition-transform"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-full bg-emerald-50/50 text-[#0B8A46] flex items-center justify-center">
+                  <Minus size={20} strokeWidth={3} />
+                </div>
+                <span className="font-bold text-[#0B8A46] text-[15px]">Retirar dinheiro</span>
+              </div>
+              <ChevronRight size={20} className="text-gray-400" />
+            </button>
+          </div>
+
+          {/* Últimas movimentações */}
+          <div className="mx-4 bg-white rounded-[28px] shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 mb-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="font-bold text-slate-900 text-[15px]">Últimas movimentações</h3>
+              <button 
+                onClick={() => { setSelectedBank(bank); setIsHistoryModalOpen(true); }} 
+                className="flex items-center gap-1 text-[#0B8A46] font-bold text-xs"
+              >
+                Ver todas <ChevronRight size={14} strokeWidth={3} />
+              </button>
+            </div>
+            
+            <div className="space-y-5">
+              {history.length === 0 ? (
+                <p className="text-sm text-slate-500 font-medium text-center py-4">Nenhuma movimentação</p>
+              ) : (
+                history.slice(0, 4).map(item => (
+                  <div key={item.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "w-10 h-10 rounded-full flex items-center justify-center",
+                        item.type === "in" ? "bg-[#E8F5E9] text-[#0B8A46]" : "bg-rose-50 text-rose-500"
+                      )}>
+                        {item.type === "in" ? <ArrowDown size={20} strokeWidth={2.5} /> : <ArrowUp size={20} strokeWidth={2.5} />}
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-900 text-[14px]">{item.type === "in" ? "Depósito" : "Retirada"}</p>
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          {new Date(item.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '').replace(' de ', ' de ').replace(/ de (\d{4})/, ', $1')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <p className={cn(
+                        "font-bold text-[14px]",
+                        item.type === "in" ? "text-[#0B8A46]" : "text-rose-500"
+                      )}>
+                        {item.type === "in" ? "+" : "-"} {formatCurrency(item.value)}
+                      </p>
+                      <ChevronRight size={18} className="text-gray-400" />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Objetivo do cofrinho */}
+          <div className="mx-4 bg-white rounded-[28px] shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-5 flex items-center justify-between mb-8">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full border-[1.5px] border-[#0B8A46] text-[#0B8A46] flex items-center justify-center">
+                <Target size={24} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-[14px]">Objetivo do cofrinho</h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">{bank.name}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Meta: {formatCurrency(bank.targetValue)}</p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-gray-400" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

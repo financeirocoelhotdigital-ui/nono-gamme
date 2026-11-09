@@ -1,0 +1,28 @@
+[
+  {
+    "uid": "keqUdkMOIcPCB6bcgIpNOF0WNJW2",
+    "id": "keqUdkMOIcPCB6bcgIpNOF0WNJW2",
+    "nome": "Novo Cliente",
+    "email": "novo_cliente_1794076034870@teste.com",
+    "senha": "senha123456",
+    "ativo": true,
+    "createdAt": "2026-11-07T18:27:15.313Z",
+    "observacoes": "",
+    "telefone": "11999999999",
+    "plano": "anual",
+    "vencimento": "2027-11-07T18:27:15.313Z"
+  },
+  {
+    "uid": "XoGajk5a43MV4HyhsjPwUOiPpjB2",
+    "id": "XoGajk5a43MV4HyhsjPwUOiPpjB2",
+    "nome": "Teste Cliente",
+    "email": "testecliente123@gmail.com",
+    "senha": "senha123456",
+    "ativo": true,
+    "createdAt": "2026-11-06T01:18:59.958Z",
+    "observacoes": "",
+    "telefone": "11999999999",
+    "plano": "anual",
+    "vencimento": "2027-11-06T01:18:59.958Z"
+  }
+]

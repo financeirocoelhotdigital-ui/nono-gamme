@@ -1,0 +1,617 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "onboardingCompleted": { "type": "boolean" },
+        "onboardingData": { "type": "object" },
+        "financialScore": { "type": "number" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Income or expense record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "value": { "type": "number" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "category": { "type": "string" },
+        "subcategory": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "date": { "type": "string", "format": "date-time" },
+        "recurrent": { "type": "boolean" },
+        "frequency": { "type": "string" },
+        "installment": { "type": "boolean" },
+        "totalInstallments": { "type": "number" },
+        "currentInstallment": { "type": "number" },
+        "installmentGroupId": { "type": "string" },
+        "accountId": { "type": "string" },
+        "cardId": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "notes": { "type": "string" },
+        "emotion": { "type": "string" },
+        "attachmentUrl": { "type": "string" },
+        "essential": { "type": "boolean" },
+        "fixed": { "type": "boolean" },
+        "incomeSource": { "type": "string" },
+        "incomeType": { "type": "string", "enum": ["fixa", "variavel"] },
+        "establishment": { "type": "string" },
+        "isImpulsive": { "type": "boolean" },
+        "fiscalType": { "type": "string", "enum": ["tributavel", "isento", "nao_tributavel", "dedutivel"] },
+        "fiscalCategory": { "type": "string", "enum": ["salario", "renda_extra", "aluguel", "investimentos", "despesas_medicas", "educacao", "pensao", "outros"] },
+        "fiscalYear": { "type": "number" }
+      },
+      "required": ["userId", "value", "type", "category", "date"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "Bank account or wallet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "balance": { "type": "number" },
+        "initialBalance": { "type": "number" },
+        "type": { "type": "string", "enum": ["banco", "carteira", "digital", "investimento"] },
+        "institution": { "type": "string" },
+        "color": { "type": "string" },
+        "icon": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "balanceThreshold": { "type": "number" }
+      },
+      "required": ["userId", "name", "balance", "initialBalance", "type", "institution", "color", "isDefault"]
+    },
+    "Card": {
+      "title": "Credit Card",
+      "description": "Credit card details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "brand": { "type": "string" },
+        "bank": { "type": "string" },
+        "limit": { "type": "number" },
+        "usedLimit": { "type": "number" },
+        "closingDay": { "type": "number" },
+        "dueDay": { "type": "number" },
+        "color": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "limit", "closingDay", "dueDay"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Credit card invoice",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "cardId": { "type": "string" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "totalValue": { "type": "number" },
+        "paidValue": { "type": "number" },
+        "status": { "type": "string", "enum": ["open", "closed", "paid", "partial", "overdue"] },
+        "dueDate": { "type": "string", "format": "date" },
+        "closingDate": { "type": "string", "format": "date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "cardId", "month", "year", "totalValue", "paidValue", "status", "dueDate", "closingDate"]
+    },
+    "Goal": {
+      "title": "Financial Goal",
+      "description": "Savings goal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "targetValue": { "type": "number" },
+        "currentValue": { "type": "number" },
+        "deadline": { "type": "string", "format": "date" },
+        "priority": { "type": "string" },
+        "status": { "type": "string" },
+        "notified50": { "type": "boolean" },
+        "notified80": { "type": "boolean" },
+        "notified100": { "type": "boolean" },
+        "notifiedNearDeadline": { "type": "boolean" },
+        "notifiedOverdue": { "type": "boolean" }
+      },
+      "required": ["userId", "name", "targetValue", "currentValue"]
+    },
+    "Debt": {
+      "title": "Debt",
+      "description": "Debt tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "creditor": { "type": "string" },
+        "totalValue": { "type": "number" },
+        "paidValue": { "type": "number" },
+        "remainingValue": { "type": "number" },
+        "interestRate": { "type": "number" },
+        "type": { "type": "string" },
+        "startDate": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "totalInstallments": { "type": "number" },
+        "paidInstallments": { "type": "number" },
+        "installmentValue": { "type": "number" },
+        "status": { "type": "string", "enum": ["ativa", "quitada", "atrasada"] },
+        "priority": { "type": "string", "enum": ["baixa", "media", "alta"] },
+        "priorityReason": { "type": "string" },
+        "urgency": { "type": "string", "enum": ["baixa", "moderada", "alta", "critica"] },
+        "urgencyReason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "totalValue", "status", "priority", "urgency"]
+    },
+    "Family": {
+      "title": "Family Member",
+      "description": "Family member income and relationship",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "relationship": { "type": "string" },
+        "income": { "type": "number" },
+        "contributionPercentage": { "type": "number" }
+      },
+      "required": ["userId", "name", "income"]
+    },
+    "Budget": {
+      "title": "Budget",
+      "description": "Monthly budget per category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "category": { "type": "string" },
+        "limit": { "type": "number" },
+        "currentSpent": { "type": "number" }
+      },
+      "required": ["userId", "category", "limit"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "Recurring subscription",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "value": { "type": "number" },
+        "dueDate": { "type": "number" },
+        "category": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["userId", "name", "value", "dueDate"]
+    },
+    "Wealth": {
+      "title": "Wealth Item",
+      "description": "Asset or property",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "value": { "type": "number" }
+      },
+      "required": ["userId", "name", "type", "value"]
+    },
+    "Insight": {
+      "title": "AI Insight",
+      "description": "Generated AI insight",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["userId", "title", "content"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "Financial document or receipt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "date": { "type": "string" },
+        "size": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "type"]
+    },
+    "Receivable": {
+      "title": "Receivable",
+      "description": "Money lent to others",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "debtorId": { "type": "string" },
+        "personName": { "type": "string" },
+        "totalValue": { "type": "number" },
+        "receivedValue": { "type": "number" },
+        "remainingValue": { "type": "number" },
+        "loanDate": { "type": "string", "format": "date" },
+        "dueDate": { "type": "string", "format": "date" },
+        "type": { "type": "string", "enum": ["emprestimo", "venda_fiado", "adiantamento", "outros"] },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["em_aberto", "parcial", "recebido", "atrasado"] },
+        "risk": { "type": "string", "enum": ["baixo", "medio", "alto", "critico"] },
+        "riskReason": { "type": "string" },
+        "probabilityOfReceiving": { "type": "number" },
+        "estimatedReceiptDate": { "type": "string", "format": "date" },
+        "probableDelayDays": { "type": "number" },
+        "aiAnalysis": { "type": "string" },
+        "priority": { "type": "string", "enum": ["cobrar_agora", "cobrar_em_breve", "pode_aguardar"] },
+        "history": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "value": { "type": "number" },
+              "date": { "type": "string", "format": "date" },
+              "notes": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "personName", "totalValue", "status", "risk", "priority"]
+    },
+    "Debtor": {
+      "title": "Debtor",
+      "description": "Person who owes money",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "phone": { "type": "string" },
+        "totalLent": { "type": "number" },
+        "totalReceived": { "type": "number" },
+        "delayRate": { "type": "number" },
+        "reliability": { "type": "string", "enum": ["alta", "media", "baixa", "critica"] },
+        "recommendedLimit": { "type": "number" },
+        "lastLoanDate": { "type": "string", "format": "date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "totalLent", "totalReceived", "reliability", "recommendedLimit"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Transaction category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "icon": { "type": "string" },
+        "color": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "type", "icon", "color"]
+    },
+    "SubCategory": {
+      "title": "SubCategory",
+      "description": "Transaction subcategory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "parentCategoryId": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "parentCategoryId"]
+    },
+    "Tag": {
+      "title": "Tag",
+      "description": "Transaction tag",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "usageCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name"]
+    },
+    "TransactionHistory": {
+      "title": "Transaction History",
+      "description": "A record of a change made to a transaction",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "action": { "type": "string", "enum": ["created", "edited", "deleted", "restored"] },
+        "date": { "type": "string", "format": "date-time" },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field": { "type": "string" },
+              "oldValue": { "type": "any" },
+              "newValue": { "type": "any" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "description": { "type": "string" },
+        "module": { "type": "string" }
+      },
+      "required": ["userId", "transactionId", "action", "date", "description", "module"]
+    },
+    "LifePlan": {
+      "title": "Life Plan",
+      "description": "Strategic life and financial plan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "horizonYears": { "type": "number" },
+        "currentIncome": { "type": "number" },
+        "currentExpenses": { "type": "number" },
+        "currentWealth": { "type": "number" },
+        "linkedGoalIds": { "type": "array", "items": { "type": "string" } },
+        "profile": { "type": "string", "enum": ["conservador", "moderado", "agressivo"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "horizonYears", "currentIncome", "currentExpenses", "currentWealth", "profile"]
+    },
+    "LifePlanSimulation": {
+      "title": "Life Plan Simulation",
+      "description": "Simulated financial decision or event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "lifePlanId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["compra", "renda", "estilo_vida"] },
+        "value": { "type": "number" },
+        "date": { "type": "string", "format": "date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "lifePlanId", "name", "type", "value", "date"]
+    },
+    "ReconciliationHistory": {
+      "title": "Reconciliation History",
+      "description": "History of account reconciliations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "accountId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "calculatedBalance": { "type": "number" },
+        "storedBalance": { "type": "number" },
+        "difference": { "type": "number" },
+        "adjustmentTransactionId": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["success", "divergence", "adjusted"] },
+        "periodStart": { "type": "string", "format": "date" },
+        "periodEnd": { "type": "string", "format": "date" }
+      },
+      "required": ["userId", "accountId", "date", "calculatedBalance", "storedBalance", "difference", "status"]
+    },
+    "ActionPlan": {
+      "title": "Action Plan",
+      "description": "AI-generated financial action plan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "summary": { "type": "string" },
+        "status": { "type": "string", "enum": ["ativo", "arquivado"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "summary", "status", "createdAt"]
+    },
+    "ActionItem": {
+      "title": "Action Item",
+      "description": "Individual task within an action plan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "planId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "why": { "type": "string" },
+        "suggestedValue": { "type": "number" },
+        "deadline": { "type": "string" },
+        "impact": { "type": "string" },
+        "priority": { "type": "string", "enum": ["urgente", "importante", "opcional"] },
+        "status": { "type": "string", "enum": ["pendente", "concluido", "ignorado"] },
+        "type": { "type": "string", "enum": ["corte_gastos", "pagamento_divida", "reserva", "investimento", "meta", "outro"] },
+        "executable": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "planId", "title", "description", "why", "priority", "status", "type", "executable", "createdAt"]
+    },
+    "Reminder": {
+      "title": "Reminder",
+      "description": "Financial or personal reminder",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["financeiro", "pessoal", "meta", "divida", "conta"] },
+        "date": { "type": "string", "format": "date" },
+        "time": { "type": "string" },
+        "recurrent": { "type": "boolean" },
+        "frequency": { "type": "string", "enum": ["diario", "semanal", "mensal"] },
+        "priority": { "type": "string", "enum": ["baixa", "media", "alta"] },
+        "status": { "type": "string", "enum": ["ativo", "concluido", "cancelado"] },
+        "actionData": {
+          "type": "object",
+          "properties": {
+            "transactionType": { "type": "string", "enum": ["income", "expense", "transfer"] },
+            "category": { "type": "string" },
+            "value": { "type": "number" },
+            "accountId": { "type": "string" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "type", "date", "recurrent", "priority", "status", "createdAt"]
+    },
+    "UserEvent": {
+      "title": "User Event",
+      "description": "Personal or financial event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["entrada", "saida", "compromisso"] },
+        "value": { "type": "number" },
+        "dateInicio": { "type": "string", "format": "date-time" },
+        "dateFim": { "type": "string", "format": "date-time" },
+        "origin": { "type": "string" },
+        "originId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pendente", "concluido", "atrasado"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "type", "dateInicio", "origin", "status", "createdAt"]
+    },
+    "PiggyBank": {
+      "title": "Piggy Bank",
+      "description": "Savings piggy bank",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "targetValue": { "type": "number" },
+        "currentValue": { "type": "number" },
+        "icon": { "type": "string" },
+        "color": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "autoSave": { "type": "boolean" },
+        "autoSaveType": { "type": "string", "enum": ["fixed", "surplus"] },
+        "autoSaveValue": { "type": "number" },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["in", "out"] },
+              "value": { "type": "number" },
+              "date": { "type": "string", "format": "date-time" },
+              "description": { "type": "string" },
+              "accountId": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "targetValue", "currentValue", "status"]
+    },
+    "Construction": {
+      "title": "Construction",
+      "description": "Progressive construction of a wealth item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "wealthItemId": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["em_andamento", "concluida"] },
+        "progress": { "type": "number" },
+        "totalInvested": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "wealthItemId", "name", "status", "progress", "totalInvested"]
+    },
+    "ConstructionStep": {
+      "title": "Construction Step",
+      "description": "A step within a construction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "constructionId": { "type": "string" },
+        "name": { "type": "string" },
+        "value": { "type": "number" },
+        "status": { "type": "string", "enum": ["pendente", "em_andamento", "concluido"] },
+        "date": { "type": "string", "format": "date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "constructionId", "name", "value", "status", "date"]
+    }
+  },
+  "firestore": {
+    "users": { "schema": "User", "description": "User profiles" },
+    "transactions": { "schema": "Transaction", "description": "Financial transactions" },
+    "accounts": { "schema": "Account", "description": "Bank accounts" },
+    "cards": { "schema": "Card", "description": "Credit cards" },
+    "invoices": { "schema": "Invoice", "description": "Credit card invoices" },
+    "goals": { "schema": "Goal", "description": "Financial goals" },
+    "debts": { "schema": "Debt", "description": "Debts" },
+    "family": { "schema": "Family", "description": "Family income" },
+    "budgets": { "schema": "Budget", "description": "Budgets" },
+    "subscriptions": { "schema": "Subscription", "description": "Active subscriptions" },
+    "wealth": { "schema": "Wealth", "description": "Wealth items" },
+    "insights": { "schema": "Insight", "description": "AI generated insights" },
+    "documents": { "schema": "Document", "description": "Financial documents" },
+    "receivables": { "schema": "Receivable", "description": "Money lent to others" },
+    "debtors": { "schema": "Debtor", "description": "People who owe money" },
+    "categories": { "schema": "Category", "description": "Transaction categories" },
+    "subCategories": { "schema": "SubCategory", "description": "Transaction subcategories" },
+    "tags": { "schema": "Tag", "description": "Transaction tags" },
+    "transactionHistory": { "schema": "TransactionHistory", "description": "Logs of changes made to transactions" },
+    "lifePlans": { "schema": "LifePlan", "description": "Strategic life plans" },
+    "lifePlanSimulations": { "schema": "LifePlanSimulation", "description": "Simulated events for life plans" },
+    "reconciliationHistory": { "schema": "ReconciliationHistory", "description": "Reconciliation history for accounts" },
+    "actionPlans": { "schema": "ActionPlan", "description": "AI-generated action plans" },
+    "actionItems": { "schema": "ActionItem", "description": "Individual tasks in action plans" },
+    "reminders": { "schema": "Reminder", "description": "Financial and personal reminders" },
+    "user_events": { "schema": "UserEvent", "description": "Personal and financial events" },
+    "piggyBanks": { "schema": "PiggyBank", "description": "Savings piggy banks" },
+    "constructions": { "schema": "Construction", "description": "Constructions for wealth items" },
+    "constructionSteps": { "schema": "ConstructionStep", "description": "Steps for constructions" }
+  }
+}

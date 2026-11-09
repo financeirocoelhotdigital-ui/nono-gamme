@@ -1,0 +1,794 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, email, displayName, photoURL, createdAt, onboardingCompleted, onboardingData, financialScore
+    //
+    // Collection: transactions
+    // Fields: userId, title, value, type, category, subcategory, tags, date, recurrent, frequency, installment, totalInstallments, currentInstallment, accountId, cardId, notes, emotion, attachmentUrl, essential, fixed, createdAt, reconciled, isAdjustment
+    //
+    // Collection: accounts
+    // Fields: userId, name, balance, type, institution, active, lastReconciliation
+    //
+    // Collection: cards
+    // Fields: userId, name, brand, bank, limit, usedLimit, closingDay, dueDay, color, active, createdAt
+    //
+    // Collection: invoices
+    // Fields: userId, cardId, month, year, totalValue, paidValue, status, dueDate, closingDate, createdAt
+    //
+    // Collection: goals
+    // Fields: userId, name, targetValue, currentValue, deadline, priority, status
+    //
+    // Collection: debts
+    // Fields: userId, name, creditor, totalValue, paidValue, remainingValue, interestRate, type, startDate, dueDate, totalInstallments, paidInstallments, installmentValue, status, priority, priorityReason, urgency, urgencyReason, createdAt
+    //
+    // Collection: family
+    // Fields: userId, name, relationship, income, monthlyExpenses, type, dependencyOf, contributionPercentage
+    //
+    // Collection: family_incomes
+    // Fields: userId, memberId, type, value, recurrent, receiveDate, description
+    //
+    // Collection: family_goals
+    // Fields: userId, name, targetValue, currentValue, deadline, description, status, memberContributions, plannedMonthlyContributions
+    //
+    // Collection: budgets
+    // Fields: userId, category, limit, currentSpent
+    //
+    // Collection: subscriptions
+    // Fields: userId, name, value, billingCycle, category, nextBilling, active
+    //
+    // Collection: wealth
+    // Fields: userId, name, type, value, description, acquisitionDate
+    //
+    // Collection: wealth_evolutions
+    // Fields: userId, wealthItemId, type, value, description, date, oldType, newType, oldName, newName, addToAssetValue, accountId, createdAt
+    //
+    // Collection: insights
+    // Fields: userId, type, title, content, date, read
+    //
+    // Collection: documents
+    // Fields: userId, name, type, date, size, createdAt
+    //
+    // Collection: receivables
+    // Fields: userId, debtorId, personName, totalValue, receivedValue, remainingValue, loanDate, dueDate, type, notes, status, risk, riskReason, probabilityOfReceiving, estimatedReceiptDate, probableDelayDays, aiAnalysis, priority, history, createdAt
+    //
+    // Collection: debtors
+    // Fields: userId, name, photoURL, phone, totalLent, totalReceived, delayRate, reliability, recommendedLimit, lastLoanDate, createdAt
+    //
+    // Collection: categories
+    // Fields: userId, name, type, icon, color, isDefault, createdAt
+    //
+    // Collection: subCategories
+    // Fields: userId, name, parentCategoryId, isDefault, createdAt
+    //
+    // Collection: tags
+    // Fields: userId, name, usageCount, createdAt
+    //
+    // Collection: lifePlans
+    // Fields: userId, name, horizonYears, currentIncome, currentExpenses, currentWealth, linkedGoalIds, profile, createdAt, updatedAt
+    //
+    // Collection: lifePlanSimulations
+    // Fields: userId, lifePlanId, name, type, value, date, createdAt
+    //
+    // Collection: reconciliationHistory
+    // Fields: userId, accountId, date, calculatedBalance, storedBalance, difference, status, periodStart, periodEnd
+    //
+    // Collection: actionPlans
+    // Fields: userId, date, summary, status, createdAt
+    //
+    // Collection: actionItems
+    // Fields: userId, planId, title, description, why, priority, status, type, executable, createdAt
+    //
+    // Collection: reminders
+    // Fields: userId, title, description, type, date, time, recurrent, frequency, priority, status, actionData, createdAt
+    //
+    // Collection: user_events
+    // Fields: userId, name, type, value, dateInicio, dateFim, origin, originId, status, createdAt
+    //
+    // Collection: diagnoses
+    // Fields: userId, score, analysis, strengths, weaknesses, risks, recommendations, createdAt
+    //
+    // Collection: score_history
+    // Fields: userId, score, date
+    //
+    // Collection: user_badges
+    // Fields: userId, badgeId, unlockedAt
+    //
+    // Collection: piggyBanks
+    // Fields: userId, name, targetValue, currentValue, icon, color, status, autoSave, autoSaveType, autoSaveValue, history, createdAt, updatedAt
+    //
+    // Collection: constructions
+    // Fields: userId, wealthItemId, name, status, progress, totalInvested, createdAt, updatedAt
+    //
+    // Collection: constructionSteps
+    // Fields: userId, constructionId, name, value, status, date, createdAt
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && resource != null && resource.data.userId == request.auth.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          request.auth.token.email == "dicasdereceitas1993@gmail.com" ||
+          request.auth.token.email == "financeirocoelhotdigital@gmail.com" ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        );
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function uidUnchanged() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid || isAdmin();
+    }
+
+    function uidNotModified() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId || isAdmin();
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string && data.email is string;
+    }
+
+    function isValidTransaction(data) {
+      return data.userId is string &&
+             data.value is number &&
+             data.type in ['income', 'expense', 'transfer'] &&
+             data.category is string &&
+             data.date is string &&
+             (!('reconciled' in data) || data.reconciled is bool) &&
+             (!('isAdjustment' in data) || data.isAdjustment is bool) &&
+             (!('fiscalType' in data) || data.fiscalType in ['tributavel', 'isento', 'nao_tributavel', 'dedutivel']) &&
+             (!('fiscalCategory' in data) || data.fiscalCategory in ['salario', 'renda_extra', 'aluguel', 'investimentos', 'despesas_medicas', 'educacao', 'pensao', 'outros']) &&
+             (!('fiscalYear' in data) || data.fiscalYear is number);
+    }
+
+    function isValidAccount(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.balance is number &&
+             (!('initialBalance' in data) || data.initialBalance is number) &&
+             data.type in ["corrente", "poupanca", "investimento", "carteira", "dinheiro", "outro", "banco", "digital"] &&
+             (!('institution' in data) || data.institution is string) &&
+             (!('color' in data) || data.color is string) &&
+             (!('isDefault' in data) || data.isDefault is bool) &&
+             (!('lastReconciliation' in data) || data.lastReconciliation is string) &&
+             (!('balanceThreshold' in data) || data.balanceThreshold == null || data.balanceThreshold is number) &&
+             (!('icon' in data) || data.icon is string) &&
+             (!('notes' in data) || data.notes is string) &&
+             (!('active' in data) || data.active is bool) &&
+             (!('createdAt' in data) || data.createdAt is string);
+    }
+
+    function isValidCard(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.limit is number &&
+             data.closingDay is number &&
+             data.dueDay is number;
+    }
+
+    function isValidInvoice(data) {
+      return data.userId is string &&
+             data.cardId is string &&
+             data.month is number &&
+             data.year is number &&
+             data.totalValue is number &&
+             data.paidValue is number &&
+             data.status in ["open", "closed", "paid", "partial", "overdue"];
+    }
+
+    function isValidGoal(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.targetValue is number;
+    }
+
+    function isValidDebt(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.totalValue is number &&
+             (!('paidValue' in data) || data.paidValue is number) &&
+             (!('remainingValue' in data) || data.remainingValue is number) &&
+             (!('originalValue' in data) || data.originalValue is number) &&
+             (!('currentValue' in data) || data.currentValue is number) &&
+             (!('status' in data) || data.status in ["ativa", "quitada", "atrasada", "em_dia", "proxima_vencimento", "vencida", "em_negociacao", "suspensa"]) &&
+             (!('priority' in data) || data.priority in ["baixa", "media", "alta", "urgente"]) &&
+             (!('urgency' in data) || data.urgency in ["baixa", "moderada", "alta", "critica"]);
+    }
+
+    function isValidFamily(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.income is number &&
+             (!('monthlyExpenses' in data) || data.monthlyExpenses is number) &&
+             (!('type' in data) || data.type in ["usuario", "dependente", "parceiro", "outro"]) &&
+             (!('dependencyOf' in data) || data.dependencyOf is string);
+    }
+
+    function isValidFamilyIncome(data) {
+      return data.userId is string &&
+             data.memberId is string &&
+             data.type in ["salario", "extra", "passiva"] &&
+             data.value is number &&
+             data.recurrent is bool &&
+             data.receiveDate is string;
+    }
+
+    function isValidFamilyGoal(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.targetValue is number &&
+             data.currentValue is number &&
+             data.deadline is string &&
+             data.status in ["ativa", "concluida", "pausada"] &&
+             data.memberContributions is map &&
+             data.plannedMonthlyContributions is map;
+    }
+
+    function isValidBudget(data) {
+      return data.userId is string &&
+             ((data.category is string && data.limit is number) ||
+              (data.categoryId is string && (data.plannedValue is number || data.limit is number)) ||
+              (data.plannedValue is number));
+    }
+
+    function isValidSubscription(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.value is number;
+    }
+
+    function isValidWealth(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.value is number &&
+             (!('purchaseValue' in data) || data.purchaseValue is number) &&
+             (!('purchaseDate' in data) || data.purchaseDate is string) &&
+             (!('type' in data) || data.type is string);
+    }
+
+    function isValidWealthEvolution(data) {
+      return data.userId is string &&
+             data.wealthItemId is string &&
+             data.value is number &&
+             (!('type' in data) || data.type is string) &&
+             (!('date' in data) || data.date is string);
+    }
+
+    function isValidInvestment(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.type in ["cdb", "poupanca", "acoes", "cripto", "fundo", "tesouro", "lci", "lca", "outro"] &&
+             data.investedValue is number &&
+             data.monthlyYield is number &&
+             data.annualYield is number &&
+             data.startDate is string;
+    }
+
+    function isValidInvestmentContribution(data) {
+      return data.userId is string &&
+             data.investmentId is string &&
+             data.value is number &&
+             data.type in ["aporte", "rendimento", "resgate"] &&
+             data.date is string;
+    }
+
+    function isValidInsight(data) {
+      return data.userId is string &&
+             data.title is string;
+    }
+
+    function isValidDocument(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.type is string;
+    }
+
+    function isValidReceivable(data) {
+      return data.userId is string &&
+             data.personName is string &&
+             data.totalValue is number &&
+             data.receivedValue is number &&
+             data.remainingValue is number &&
+             data.status in ["em_aberto", "parcial", "recebido", "atrasado"] &&
+             data.risk in ["baixo", "medio", "alto", "critico"] &&
+             data.priority in ["cobrar_agora", "cobrar_em_breve", "pode_aguardar"];
+    }
+
+    function isValidDebtor(data) {
+      return data.userId is string &&
+             data.name is string &&
+             (!('totalLent' in data) || data.totalLent is number) &&
+             (!('totalReceived' in data) || data.totalReceived is number) &&
+             (!('reliability' in data) || data.reliability in ["alta", "media", "baixa", "critica"]) &&
+             (!('recommendedLimit' in data) || data.recommendedLimit is number);
+    }
+
+    function isValidCategory(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.type in ["income", "expense"] &&
+             data.icon is string &&
+             data.color is string;
+    }
+
+    function isValidSubCategory(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.parentCategoryId is string;
+    }
+
+    function isValidTag(data) {
+      return data.userId is string &&
+             data.name is string;
+    }
+
+    function isValidLifePlan(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.horizonYears is number &&
+             data.currentIncome is number &&
+             data.currentExpenses is number &&
+             data.currentWealth is number &&
+             data.profile in ["conservador", "moderado", "agressivo"];
+    }
+
+    function isValidLifePlanSimulation(data) {
+      return data.userId is string &&
+             data.lifePlanId is string &&
+             data.name is string &&
+             data.type in ["compra", "renda", "estilo_vida"] &&
+             data.value is number &&
+             data.date is string;
+    }
+
+    function isValidReconciliationHistory(data) {
+      return data.userId is string &&
+             data.accountId is string &&
+             data.date is string &&
+             data.calculatedBalance is number &&
+             data.storedBalance is number &&
+             data.difference is number &&
+             data.status in ["success", "divergence", "adjusted"];
+    }
+
+    function isValidActionPlan(data) {
+      return data.userId is string &&
+             data.date is string &&
+             data.summary is string &&
+             data.status in ["ativo", "arquivado"] &&
+             data.createdAt is string;
+    }
+
+    function isValidActionItem(data) {
+      return data.userId is string &&
+             data.planId is string &&
+             data.title is string &&
+             data.description is string &&
+             data.why is string &&
+             data.priority in ["urgente", "importante", "opcional"] &&
+             data.status in ["pendente", "concluido", "ignorado"] &&
+             data.type in ["corte_gastos", "pagamento_divida", "reserva", "investimento", "meta", "outro"] &&
+             data.executable is bool &&
+             data.createdAt is string;
+    }
+
+    function isValidReminder(data) {
+      return data.userId is string &&
+             data.title is string &&
+             data.type in ["financeiro", "pessoal", "meta", "divida", "conta"] &&
+             data.date is string &&
+             data.recurrent is bool &&
+             data.priority in ["baixa", "media", "alta"] &&
+             data.status in ["ativo", "concluido", "cancelado"] &&
+             data.createdAt is string;
+    }
+
+    function isValidUserEvent(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.type in ["entrada", "saida", "compromisso"] &&
+             data.dateInicio is string &&
+             data.origin is string &&
+             data.status in ["pendente", "concluido", "atrasado"] &&
+             data.createdAt is string;
+    }
+
+    function isValidDiagnosis(data) {
+      return data.userId is string &&
+             data.score is number &&
+             data.analysis is string &&
+             data.strengths is list &&
+             data.weaknesses is list &&
+             data.risks is list &&
+             data.recommendations is list &&
+             data.createdAt is string;
+    }
+
+    function isValidScoreHistory(data) {
+      return data.userId is string &&
+             data.score is number &&
+             data.date is string;
+    }
+
+    function isValidUserBadge(data) {
+      return data.userId is string &&
+             data.badgeId is string &&
+             data.unlockedAt is string;
+    }
+
+    function isValidPiggyBank(data) {
+      return data.userId is string &&
+             data.name is string &&
+             data.targetValue is number &&
+             data.currentValue is number &&
+             data.status in ["active", "completed"] &&
+             (!('autoSave' in data) || data.autoSave is bool) &&
+             (!('autoSaveType' in data) || data.autoSaveType in ["fixed", "surplus"]) &&
+             (!('autoSaveValue' in data) || data.autoSaveValue is number) &&
+             (!('history' in data) || data.history is list);
+    }
+
+    function isValidConstruction(data) {
+      return data.userId is string &&
+             data.wealthItemId is string &&
+             data.name is string &&
+             data.status in ["em_andamento", "concluida"] &&
+             data.progress is number &&
+             data.totalInvested is number;
+    }
+
+    function isValidConstructionStep(data) {
+      return data.userId is string &&
+             data.constructionId is string &&
+             data.name is string &&
+             data.value is number &&
+             data.status in ["pendente", "em_andamento", "concluido"] &&
+             data.date is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /transactions/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidTransaction(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /accounts/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidAccount(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidAccount(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /cards/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidCard(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidCard(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /invoices/{id} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && resource.data.userId == request.auth.uid));
+      allow create: if isAuthenticated() && isValidInvoice(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && (isAdmin() || (resource != null && resource.data.userId == request.auth.uid)) && isValidInvoice(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && resource.data.userId == request.auth.uid));
+    }
+
+    match /goals/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidGoal(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidGoal(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /family/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidFamily(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidFamily(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /family_incomes/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidFamilyIncome(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidFamilyIncome(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /family_goals/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidFamilyGoal(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidFamilyGoal(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /budgets/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidBudget(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidBudget(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /subscriptions/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidSubscription(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidSubscription(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /wealth/{id} {
+      allow read: if isAuthenticated() && (isAdmin() || resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidWealth(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && (isAdmin() || resource == null || resource.data.userId == request.auth.uid) && isValidWealth(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && (isAdmin() || resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    match /wealth_evolutions/{id} {
+      allow read: if isAuthenticated() && (isAdmin() || resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidWealthEvolution(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && (isAdmin() || resource == null || resource.data.userId == request.auth.uid) && isValidWealthEvolution(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && (isAdmin() || resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    match /investments/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidInvestment(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidInvestment(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /investment_contributions/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidInvestmentContribution(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidInvestmentContribution(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /insights/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidInsight(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidInsight(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /documents/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidDocument(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidDocument(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /receivables/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidReceivable(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidReceivable(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /debtors/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidDebtor(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidDebtor(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /categories/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidCategory(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidCategory(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /subCategories/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidSubCategory(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidSubCategory(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /tags/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidTag(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidTag(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /transactionHistory/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && uidUnchanged();
+      allow update: if false; // History should be immutable
+      allow delete: if isAdmin();
+    }
+
+    match /lifePlans/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidLifePlan(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidLifePlan(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /lifePlanSimulations/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidLifePlanSimulation(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidLifePlanSimulation(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /reconciliationHistory/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidReconciliationHistory(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidReconciliationHistory(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /actionPlans/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidActionPlan(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidActionPlan(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /actionItems/{id} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidActionItem(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidActionItem(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /debts/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isOwner(request.resource.data.userId) && isValidDebt(request.resource.data);
+      allow update: if (isDocOwner() || isAdmin()) && isValidDebt(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /installments/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isOwner(request.resource.data.userId);
+      allow update: if (isDocOwner() || isAdmin()) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /debtHistory/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isOwner(request.resource.data.userId);
+      allow update: if false; // History is immutable
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /reminders/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidReminder(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidReminder(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /user_events/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidUserEvent(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidUserEvent(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /strategic_insights/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /diagnoses/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidDiagnosis(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidDiagnosis(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /score_history/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidScoreHistory(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidScoreHistory(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /user_badges/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidUserBadge(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidUserBadge(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /piggyBanks/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidPiggyBank(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidPiggyBank(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /constructions/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidConstruction(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidConstruction(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /constructionSteps/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidConstructionStep(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidConstructionStep(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /family/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidFamily(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidFamily(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /family_incomes/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidFamilyIncome(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidFamilyIncome(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /family_goals/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidFamilyGoal(request.resource.data) && uidUnchanged();
+      allow update: if (isDocOwner() || isAdmin()) && isValidFamilyGoal(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /usuarios/{id} {
+      allow read, write: if true;
+    }
+
+    match /anuncios/{id} {
+      allow read, write: if true;
+    }
+
+    match /config_sistema/{id} {
+      allow read, write: if true;
+    }
+  }
+}
