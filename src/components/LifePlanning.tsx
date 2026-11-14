@@ -60,17 +60,18 @@ export function LifePlanning({ user, profile }: any) {
 
   const [scenario, setScenario] = useState<LifePlanScenario>("realista");
   const [isCreating, setIsCreating] = useState(false);
+  const [hasEditedWealth, setHasEditedWealth] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Form states for creation
+  // Form states for creation/editing
   const [formData, setFormData] = useState({
     name: "Meu Plano de Vida",
     horizonYears: 10,
     profile: "moderado" as LifePlanProfile,
-    currentIncome: 0,
-    currentExpenses: 0,
-    currentWealth: 0,
+    currentIncome: "",
+    currentExpenses: "",
+    currentWealth: "",
     linkedGoalIds: [] as string[]
   });
 
@@ -79,7 +80,7 @@ export function LifePlanning({ user, profile }: any) {
   const [simForm, setSimForm] = useState({
     name: "",
     type: "compra" as LifePlanSimulation["type"],
-    value: 0,
+    value: "",
     date: new Date().toISOString().split('T')[0]
   });
 
@@ -94,32 +95,54 @@ export function LifePlanning({ user, profile }: any) {
         name: lifePlan.name,
         horizonYears: lifePlan.horizonYears,
         profile: lifePlan.profile,
-        currentIncome: lifePlan.currentIncome,
-        currentExpenses: lifePlan.currentExpenses,
-        currentWealth: lifePlan.currentWealth,
+        currentIncome: lifePlan.currentIncome ? String(lifePlan.currentIncome) : "",
+        currentExpenses: lifePlan.currentExpenses ? String(lifePlan.currentExpenses) : "",
+        currentWealth: lifePlan.currentWealth ? String(lifePlan.currentWealth) : "",
         linkedGoalIds: lifePlan.linkedGoalIds || []
       });
-    } else if (estimatedWealth > 0 && formData.currentWealth === 0) {
+    } else if (estimatedWealth > 0 && !hasEditedWealth && formData.currentWealth === "") {
       setFormData(prev => ({
         ...prev,
-        currentWealth: Math.max(0, estimatedWealth),
-        currentIncome: prev.currentIncome || 0,
-        currentExpenses: prev.currentExpenses || 0
+        currentWealth: String(Math.max(0, estimatedWealth))
       }));
     }
-  }, [lifePlan, estimatedWealth]);
+  }, [lifePlan, estimatedWealth, hasEditedWealth]);
+
+  const parseNumericInput = (val: string) => {
+    const normalized = String(val || "").replace(",", ".");
+    const parsed = parseFloat(normalized);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createLifePlan(formData);
+    const payload = {
+      name: formData.name,
+      horizonYears: formData.horizonYears,
+      profile: formData.profile,
+      currentIncome: parseNumericInput(formData.currentIncome),
+      currentExpenses: parseNumericInput(formData.currentExpenses),
+      currentWealth: parseNumericInput(formData.currentWealth),
+      linkedGoalIds: formData.linkedGoalIds
+    };
+    if (lifePlan) {
+      await updateLifePlan(payload);
+    } else {
+      await createLifePlan(payload);
+    }
     setIsCreating(false);
   };
 
   const handleAddSim = async (e: React.FormEvent) => {
     e.preventDefault();
-    await addSimulation(simForm);
+    await addSimulation({
+      name: simForm.name,
+      type: simForm.type,
+      value: parseNumericInput(simForm.value),
+      date: simForm.date
+    });
     setShowSimForm(false);
-    setSimForm({ name: "", type: "compra", value: 0, date: new Date().toISOString().split('T')[0] });
+    setSimForm({ name: "", type: "compra", value: "", date: new Date().toISOString().split('T')[0] });
   };
 
   const handleAnalyze = async () => {
@@ -159,7 +182,7 @@ export function LifePlanning({ user, profile }: any) {
         </p>
         <button
           onClick={() => setIsCreating(true)}
-          className="bg-white text-slate-900 px-10 py-5 rounded-3xl font-bold text-lg shadow-[0_8px_30px_rgba(0,0,0,0.04)] shadow-primary-dark/20 hover:scale-105 transition-transform flex items-center gap-3 mx-auto"
+          className="bg-emerald-600 text-white px-10 py-5 rounded-3xl font-bold text-lg shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 hover:scale-105 transition-all flex items-center gap-3 mx-auto"
         >
           <Plus size={24} />
           Começar Meu Planejamento
@@ -211,8 +234,11 @@ export function LifePlanning({ user, profile }: any) {
               <label className="text-xs font-black text-gray-400 uppercase tracking-widest">Renda Mensal Atual</label>
               <input
                 type="number"
+                step="0.01"
+                min="0"
+                placeholder="0,00"
                 value={formData.currentIncome}
-                onChange={e => setFormData({ ...formData, currentIncome: Number(e.target.value) })}
+                onChange={e => setFormData({ ...formData, currentIncome: e.target.value })}
                 className="w-full p-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-primary-lime font-bold"
                 required
               />
@@ -221,8 +247,11 @@ export function LifePlanning({ user, profile }: any) {
               <label className="text-xs font-black text-gray-400 uppercase tracking-widest">Gastos Mensais Atuais</label>
               <input
                 type="number"
+                step="0.01"
+                min="0"
+                placeholder="0,00"
                 value={formData.currentExpenses}
-                onChange={e => setFormData({ ...formData, currentExpenses: Number(e.target.value) })}
+                onChange={e => setFormData({ ...formData, currentExpenses: e.target.value })}
                 className="w-full p-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-primary-lime font-bold"
                 required
               />
@@ -231,8 +260,14 @@ export function LifePlanning({ user, profile }: any) {
               <label className="text-xs font-black text-gray-400 uppercase tracking-widest">Patrimônio Atual</label>
               <input
                 type="number"
+                step="0.01"
+                min="0"
+                placeholder="0,00"
                 value={formData.currentWealth}
-                onChange={e => setFormData({ ...formData, currentWealth: Number(e.target.value) })}
+                onChange={e => {
+                  setHasEditedWealth(true);
+                  setFormData({ ...formData, currentWealth: e.target.value });
+                }}
                 className="w-full p-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-primary-lime font-bold"
                 required
               />
@@ -297,9 +332,9 @@ export function LifePlanning({ user, profile }: any) {
             </button>
             <button
               type="submit"
-              className="flex-1 p-4 bg-white text-slate-900 rounded-2xl font-bold shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:scale-[1.02] transition-transform"
+              className="flex-1 p-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 hover:scale-[1.02] transition-all"
             >
-              Criar Plano
+              {lifePlan ? "Salvar Alterações" : "Criar Plano"}
             </button>
           </div>
         </form>
@@ -314,9 +349,17 @@ export function LifePlanning({ user, profile }: any) {
         <div className="lg:col-span-2 bg-white p-8 rounded-5xl text-slate-900 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-50 rounded-full blur-3xl -mr-32 -mt-32" />
           <div className="relative z-10">
-            <div className="flex items-center gap-3 mb-6">
-              <Heart className="text-emerald-600" size={24} />
-              <h1 className="text-3xl font-black tracking-tight">{lifePlan?.name}</h1>
+            <div className="flex items-center justify-between gap-3 mb-6">
+              <div className="flex items-center gap-3">
+                <Heart className="text-emerald-600" size={24} />
+                <h1 className="text-3xl font-black tracking-tight">{lifePlan?.name}</h1>
+              </div>
+              <button
+                onClick={() => setIsCreating(true)}
+                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-slate-900 text-xs font-bold transition-colors"
+              >
+                Editar Plano
+              </button>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
               <div>
@@ -677,8 +720,11 @@ export function LifePlanning({ user, profile }: any) {
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest">Valor</label>
                     <input
                       type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0,00"
                       value={simForm.value}
-                      onChange={e => setSimForm({ ...simForm, value: Number(e.target.value) })}
+                      onChange={e => setSimForm({ ...simForm, value: e.target.value })}
                       className="w-full p-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-primary-lime font-bold"
                       required
                     />
@@ -704,7 +750,7 @@ export function LifePlanning({ user, profile }: any) {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 p-4 bg-white text-slate-900 rounded-2xl font-bold shadow-[0_8px_30px_rgba(0,0,0,0.04)]"
+                    className="flex-1 p-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors"
                   >
                     Simular
                   </button>

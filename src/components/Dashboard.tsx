@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { UserProfile, FamilyMember, Debtor, AIInsight, Transaction } from "../types";
 import { cn, formatCurrency } from "../lib/utils";
+import { UserAvatar } from "./UserAvatar";
 import {
   Bell,
   Eye,
@@ -297,11 +298,12 @@ export function Dashboard({ userProfile, insights = [], onTabChange, mostrarMens
               >
                 <Menu size={20} />
               </button>
-              <img 
-                src={userProfile?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userName)}`} 
-                alt="Avatar" 
-                className="w-11 h-11 rounded-full shadow-md object-cover border-2 border-white bg-emerald-100"
-                referrerPolicy="no-referrer"
+              <UserAvatar
+                userProfile={userProfile}
+                size="md"
+                className="shadow-md border-2 border-white bg-emerald-100"
+                onClick={() => onTabChange("avatar")}
+                title="Personalizar Meu Avatar"
               />
               <div>
                 <h1 className="text-[16px] font-bold text-slate-900 leading-tight">

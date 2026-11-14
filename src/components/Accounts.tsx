@@ -8,7 +8,6 @@ import { useTransacoes } from "../context/TransacoesContext";
 import { 
   Landmark, 
   Wallet, 
-  PiggyBank, 
   TrendingUp, 
   TrendingDown,
   Banknote, 
@@ -39,6 +38,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { useNavigate } from "react-router-dom";
 import { BankIcon } from "./BankIcon";
+import { ProPiggyIcon } from "./AnimatedPiggy";
 import { ALL_BANKS } from "../constants/banks";
 
 // Helper to map account types to custom Portuguese names
@@ -62,7 +62,7 @@ export function getAccountIcon(iconName?: string) {
   switch (iconName) {
     case "landmark": return <Landmark size={size} />;
     case "wallet": return <Wallet size={size} />;
-    case "piggy": return <PiggyBank size={size} />;
+    case "piggy": return <ProPiggyIcon size={size} />;
     case "trending": return <TrendingUp size={size} />;
     case "cash": return <Banknote size={size} />;
     case "smartphone": return <Smartphone size={size} />;
@@ -240,9 +240,9 @@ export function Accounts() {
         
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
           <div className="space-y-2 flex-1">
-            <div className="flex items-center gap-2 bg-white/5 border border-gray-50 px-3 py-1 rounded-full backdrop-blur-sm w-max">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-300">Patrimônio Líquido Disponível</span>
+            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-full w-max">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-700">Patrimônio Líquido Disponível</span>
             </div>
             <h1 className="text-4xl md:text-5xl font-black tracking-tight text-slate-900 flex items-baseline gap-2 mt-2">
               {formatCurrency(totalBalance)}
@@ -273,7 +273,7 @@ export function Accounts() {
         </div>
         <button 
           onClick={() => setIsAddingAccount(true)}
-          className="flex items-center gap-2 h-12 px-5 rounded-[16px] bg-white hover:bg-gray-800 active:scale-95 text-emerald-600 font-bold text-xs tracking-wide transition-all cursor-pointer shadow-sm hover:shadow-md"
+          className="flex items-center gap-2 h-12 px-5 rounded-[16px] bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs tracking-wide transition-all cursor-pointer shadow-lg shadow-emerald-600/20"
         >
           <Plus size={16} strokeWidth={2.5} />
           Nova Conta
@@ -439,7 +439,7 @@ export function Accounts() {
           </p>
           <button
             onClick={() => setIsAddingAccount(true)}
-            className="mt-8 px-6 py-3.5 bg-white text-emerald-600 font-bold text-sm tracking-wide rounded-[16px] shadow-sm hover:shadow-md transition-all cursor-pointer"
+            className="mt-8 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm tracking-wide rounded-[16px] shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
           >
             Adicionar Nova Conta
           </button>
@@ -511,8 +511,14 @@ export function Accounts() {
                       </div>
                       
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-xl font-bold text-slate-900 tracking-tight leading-none">{acc.name}</h3>
+                          {acc.isDefault && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-black text-[9px] uppercase tracking-wider border border-amber-200">
+                              <Star size={10} fill="currentColor" />
+                              Conta Principal
+                            </span>
+                          )}
                           {!acc.active && (
                             <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 font-bold text-[9px] uppercase tracking-wider">Inativa</span>
                           )}
@@ -633,15 +639,24 @@ export function Accounts() {
                       </button>
 
                       {/* Default Account star selection */}
-                      {!acc.isDefault && acc.active && (
+                      {acc.isDefault ? (
+                        <span
+                          className="h-9 px-3 rounded-[12px] bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider"
+                          title="Esta é sua Conta Principal"
+                        >
+                          <Star size={12} fill="currentColor" />
+                          Principal
+                        </span>
+                      ) : acc.active ? (
                         <button
                           onClick={() => handleSetDefault(acc.id)}
-                          className="h-9 w-9 rounded-[12px] bg-gray-50 hover:bg-amber-100 hover:text-amber-600 text-gray-400 flex items-center justify-center border border-transparent hover:border-amber-200 transition-all duration-300 cursor-pointer"
+                          className="h-9 px-3 rounded-[12px] bg-gray-50 hover:bg-amber-100 hover:text-amber-700 text-gray-500 flex items-center gap-1.5 border border-transparent hover:border-amber-200 transition-all duration-300 cursor-pointer text-[10px] font-bold uppercase tracking-wider"
                           title="Definir como Principal"
                         >
-                          <Star size={14} />
+                          <Star size={12} />
+                          Principal
                         </button>
-                      )}
+                      ) : null}
 
                       {/* Account Statement */}
                       <button
@@ -807,7 +822,9 @@ function AccountForm({
   const [notes, setNotes] = useState(initialData?.notes || "");
   const [color, setColor] = useState(initialData?.color || "#10b981");
   const [icon, setIcon] = useState(initialData?.icon || "landmark");
-  const [isDefault, setIsDefault] = useState(initialData?.isDefault || false);
+  const [isDefault, setIsDefault] = useState(
+    initialData ? !!initialData.isDefault : (accounts.length === 0 || !accounts.some(a => a.isDefault))
+  );
   const [isActive, setIsActive] = useState(initialData?.active !== false);
 
   // Currency masked input values
@@ -846,7 +863,7 @@ function AccountForm({
     { id: "landmark", label: "Banco", component: <Landmark size={18} /> },
     { id: "smartphone", label: "Digital", component: <Smartphone size={18} /> },
     { id: "wallet", label: "Carteira", component: <Wallet size={18} /> },
-    { id: "piggy", label: "Poupança", component: <PiggyBank size={18} /> },
+    { id: "piggy", label: "Poupança", component: <ProPiggyIcon size={18} /> },
     { id: "cash", label: "Dinheiro", component: <Banknote size={18} /> },
     { id: "trending", label: "Investimento", component: <TrendingUp size={18} /> },
     { id: "card", label: "Cartão", component: <CreditCard size={18} /> },
@@ -955,17 +972,8 @@ function AccountForm({
     try {
       if (initialData) {
         await updateAccount(initialData.id, data);
-        
-        // If set as default now, handle reset of others inside the service
-        if (isDefault && !initialData.isDefault) {
-          await setDefaultAccount(initialData.id);
-        }
       } else {
-        // Create new account
-        const created = await addAccount(data as any);
-        if (created && isDefault) {
-          await setDefaultAccount(created.id);
-        }
+        await addAccount(data as any);
       }
       onClose();
     } catch (err) {
@@ -1109,7 +1117,7 @@ function AccountForm({
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {[
                 { id: "corrente", label: "C. Corrente", icon: <Landmark size={14} /> },
-                { id: "poupanca", label: "Poupança", icon: <PiggyBank size={14} /> },
+                { id: "poupanca", label: "Poupança", icon: <ProPiggyIcon size={14} /> },
                 { id: "investimento", label: "Investimento", icon: <TrendingUp size={14} /> },
                 { id: "carteira", label: "Carteira", icon: <Wallet size={14} /> },
                 { id: "dinheiro", label: "Espécie", icon: <Banknote size={14} /> },
@@ -1257,15 +1265,15 @@ function AccountForm({
               </div>
               <button
                 type="button"
-                disabled={accounts.length === 0 && !initialData}
                 onClick={() => setIsDefault(!isDefault)}
+                aria-pressed={isDefault}
                 className={cn(
-                  "w-12 h-6 rounded-full relative transition-colors cursor-pointer",
+                  "w-12 h-6 rounded-full relative transition-colors cursor-pointer shrink-0",
                   isDefault ? "bg-amber-400" : "bg-neutral-200"
                 )}
               >
                 <div className={cn(
-                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-sm",
                   isDefault ? "right-1" : "left-1"
                 )} />
               </button>

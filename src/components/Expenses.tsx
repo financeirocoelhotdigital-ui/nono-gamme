@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Transaction, Account, Card, Emotion, Category, SubCategory, Tag as TagType } from "../types";
 import { auth, db } from "../lib/firebase";
@@ -548,7 +548,8 @@ export function ExpenseForm({
   subCategories, 
   tags, 
   transactions,
-  initialData 
+  initialData,
+  defaultAccountId
 }: { 
   onClose: () => void, 
   accounts: Account[], 
@@ -557,8 +558,15 @@ export function ExpenseForm({
   subCategories: SubCategory[],
   tags: TagType[],
   transactions: Transaction[],
-  initialData?: Transaction 
+  initialData?: Transaction,
+  defaultAccountId?: string
 }) {
+  const preferredAccount =
+    (defaultAccountId ? accounts.find(a => a.id === defaultAccountId) : undefined) ||
+    accounts.find(a => a.isDefault && a.active !== false) ||
+    accounts.find(a => a.isDefault) ||
+    accounts.find(a => a.active !== false) ||
+    accounts[0];
   const [value, setValue] = useState(initialData?.value.toString() || "");
   const [category, setCategory] = useState(initialData?.category || "");
   const [subCategory, setSubCategory] = useState(initialData?.subCategory || "");
@@ -566,7 +574,7 @@ export function ExpenseForm({
   const [emotion, setEmotion] = useState<Emotion>(initialData?.emotion || "neutro");
   const [isImpulsive, setIsImpulsive] = useState(initialData?.isImpulsive || false);
   const [date, setDate] = useState(formatDateForInput(initialData?.date));
-  const [accountId, setAccountId] = useState(initialData?.accountId || "");
+  const [accountId, setAccountId] = useState(initialData?.accountId || (initialData?.cardId ? "" : preferredAccount?.id || ""));
   const [cardId, setCardId] = useState(initialData?.cardId || "");
   const [essential, setEssential] = useState(initialData?.essential || false);
   const [installment, setInstallment] = useState(initialData?.installment || false);
@@ -583,6 +591,18 @@ export function ExpenseForm({
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showInlineAddSubCategory, setShowInlineAddSubCategory] = useState(false);
   const [newSubCategoryName, setNewSubCategoryName] = useState("");
+
+  useEffect(() => {
+    if (!initialData && !accountId && !cardId && accounts.length > 0) {
+      const def =
+        (defaultAccountId ? accounts.find(a => a.id === defaultAccountId) : undefined) ||
+        accounts.find(a => a.isDefault && a.active !== false) ||
+        accounts.find(a => a.isDefault) ||
+        accounts.find(a => a.active !== false) ||
+        accounts[0];
+      if (def) setAccountId(def.id);
+    }
+  }, [accounts, accountId, cardId, initialData, defaultAccountId]);
 
   const handleInlineAddCategory = async () => {
     const catName = newCategoryName.trim();
@@ -997,7 +1017,7 @@ export function ExpenseForm({
             >
               <option value="">Selecionar conta ou cartão...</option>
               <optgroup label="Contas">
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.isDefault ? " ★ (Principal)" : ""}</option>)}
               </optgroup>
               <optgroup label="Cartões">
                 {cards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}

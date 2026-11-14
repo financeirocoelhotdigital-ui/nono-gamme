@@ -107,6 +107,8 @@ const TaxManagement = lazyWithRetry(() => import("./components/TaxManagement"));
 const FinancialDiagnosis = lazyWithRetry(() => import("./components/FinancialDiagnosis"));
 const FinancialInsights = lazyWithRetry(() => import("./components/FinancialInsights"), "FinancialInsights");
 const Investments = lazyWithRetry(() => import("./components/Investments"), "Investments");
+const Support = lazyWithRetry(() => import("./components/Support"));
+const AvatarCustomizer = lazyWithRetry(() => import("./components/AvatarCustomizer"));
 const AdminPanel = lazyWithRetry(() => import("./components/AdminPanel"));
 
 
@@ -202,7 +204,7 @@ function AppContent() {
       const updated = e.detail;
       if (updated) {
         setUser(prev => prev ? ({ ...prev, displayName: updated.displayName, photoURL: updated.photoURL } as any) : updated);
-        setUserProfile(prev => prev ? ({ ...prev, displayName: updated.displayName, photoURL: updated.photoURL }) : updated);
+        setUserProfile(prev => prev ? ({ ...prev, displayName: updated.displayName, photoURL: updated.photoURL, avatarConfig: updated.avatarConfig ?? prev.avatarConfig }) : updated);
       }
     };
     window.addEventListener("user_profile_updated", handleProfileUpdated);
@@ -810,6 +812,7 @@ function AppContent() {
               email: customUser.email || "",
               displayName: customUser.displayName || customUser.email?.split("@")[0] || "Usuário",
               photoURL: customUser.photoURL || "",
+              avatarConfig: customUser.avatarConfig,
               createdAt: new Date().toISOString(),
               onboardingCompleted: true,
               financialScore: 80
@@ -839,12 +842,34 @@ function AppContent() {
   };
 
   useEffect(() => {
+    const LOCAL_DEBTORS_KEY = "finance_local_debtors_v1";
+    const loadLocalDebtors = (): Debtor[] => {
+      try {
+        const raw = localStorage.getItem(LOCAL_DEBTORS_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(parsed)) return [];
+        const map = new Map<string, Debtor>();
+        parsed.forEach((d: Debtor) => {
+          if (d?.id && !map.has(d.id)) map.set(d.id, d);
+        });
+        return Array.from(map.values());
+      } catch {
+        return [];
+      }
+    };
+
     if (!user || !auth.currentUser) {
       setBudgets([]);
       setInsights([]);
       setDocuments([]);
-      setDebtors([]);
-      return;
+      setDebtors(user ? loadLocalDebtors() : []);
+      const handleLocalDebtors = () => {
+        if (user) setDebtors(loadLocalDebtors());
+      };
+      window.addEventListener("local_debtors_changed", handleLocalDebtors);
+      return () => {
+        window.removeEventListener("local_debtors_changed", handleLocalDebtors);
+      };
     }
 
     const currentUid = auth.currentUser.uid;
@@ -871,7 +896,17 @@ function AppContent() {
 
     const qDebtors = query(collection(db, "debtors"), where("userId", "==", currentUid));
     const unsubDebtors = onSnapshot(qDebtors, (snap) => {
-      setDebtors(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Debtor)));
+      const map = new Map<string, Debtor>();
+      snap.docs.forEach(docSnap => {
+        if (!map.has(docSnap.id)) {
+          map.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as Debtor);
+        }
+      });
+      const list = Array.from(map.values());
+      try {
+        localStorage.setItem(LOCAL_DEBTORS_KEY, JSON.stringify(list));
+      } catch {}
+      setDebtors(list);
     }, (error) => {
       console.warn("Notice: debtors snapshot warning:", error);
     });
@@ -1059,6 +1094,10 @@ function AppContent() {
         />
       } />
       <Route path="/security" element={<Navigate to="/settings" replace />} />
+      <Route path="/avatar" element={<AvatarCustomizer userProfile={userProfile} mostrarMensagem={mostrarMensagem} />} />
+      <Route path="/meu-avatar" element={<Navigate to="/avatar" replace />} />
+      <Route path="/support" element={<Support userProfile={userProfile!} mostrarMensagem={mostrarMensagem} />} />
+      <Route path="/suporte" element={<Navigate to="/support" replace />} />
 
       <Route path="/admin" element={<AdminPanel userProfile={userProfile!} onLogout={handleLogout} mostrarMensagem={mostrarMensagem} />} />
 
@@ -1121,7 +1160,7 @@ function AppContent() {
               <h3 className="font-bold mb-1">Ainda tem dúvidas?</h3>
               <p className="text-xs text-white/60">Nossa equipe de suporte está pronta para ajudar.</p>
             </div>
-            <button onClick={() => window.open("mailto:suporte@finassist.com", "_blank")} className="px-6 py-3 bg-primary-lime text-primary-dark font-bold rounded-2xl whitespace-nowrap hover:scale-105 transition-transform">
+            <button onClick={() => navigate("/support")} className="px-6 py-3 bg-primary-lime text-primary-dark font-bold rounded-2xl whitespace-nowrap hover:scale-105 transition-transform cursor-pointer">
               Falar com Suporte
             </button>
           </div>

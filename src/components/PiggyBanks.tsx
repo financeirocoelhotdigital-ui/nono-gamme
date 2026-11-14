@@ -1,18 +1,16 @@
 import React, { useState, useMemo } from "react";
 import { 
-  Plus, Target, History, Settings, Trash2, ChevronRight, AlertCircle, CheckCircle2, 
-  ArrowRight, ArrowRightLeft, Calendar, Sparkles, Info, X, Zap, ArrowLeft, Minus, MoreHorizontal, 
-  Bell, Edit2, ArrowDown, ArrowUp, PiggyBank as PiggyIcon, Search, Filter, Download
+  Plus, Target, History, Trash2, ChevronRight, AlertCircle,
+  ArrowRight, X, ArrowLeft, Minus, MoreHorizontal, 
+  Bell, Edit2, ArrowDown, ArrowUp, Search, Filter
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePiggyBanks } from "../context/PiggyBankContext";
 import { useContas } from "../context/ContasContext";
-import { PiggyBank, PiggyBankHistory } from "../types";
+import { PiggyBank } from "../types";
 import { cn, formatCurrency } from "../lib/utils";
 
-// Imagem premium gerada
-import PremiumPiggyBankImg from '../assets/images/premium_3d_piggy_bank_1788366869999.jpg';
-import { AnimatedPiggy } from "./AnimatedPiggy";
+import { AnimatedPiggy, ProPiggyIcon } from "./AnimatedPiggy";
 
 // ... Modals definitions will be placed here (Action, Create, History, etc.)
 
@@ -20,6 +18,7 @@ function PiggyBankActionModal({ isOpen, onClose, bank, type, accounts, onConfirm
   const [value, setValue] = useState("");
   const [accountId, setAccountId] = useState("");
   const [description, setDescription] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const isAdd = type === "add";
 
   return (
@@ -108,8 +107,17 @@ function PiggyBankActionModal({ isOpen, onClose, bank, type, accounts, onConfirm
         </div>
 
         <button 
-          onClick={() => onConfirm((parseFloat(value.toString().replace(/\./g, "").replace(",", ".")) || 0), accountId, description)}
-          disabled={!value || (parseFloat(value.toString().replace(/\./g, "").replace(",", ".")) || 0) <= 0 || !accountId || (!isAdd && (parseFloat(value.toString().replace(/\./g, "").replace(",", ".")) || 0) > bank.currentValue)}
+          onClick={async () => {
+            if (isSubmitting) return;
+            setIsSubmitting(true);
+            try {
+              const numericVal = parseFloat(value.toString().replace(/\./g, "").replace(",", ".")) || 0;
+              await onConfirm(numericVal, accountId, description);
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+          disabled={isSubmitting || !value || (parseFloat(value.toString().replace(/\./g, "").replace(",", ".")) || 0) <= 0 || !accountId || (!isAdd && (parseFloat(value.toString().replace(/\./g, "").replace(",", ".")) || 0) > bank.currentValue)}
           className={cn(
             "w-full mt-6 py-5 rounded-[32px] font-black text-lg shadow-[0_8px_30px_rgba(0,0,0,0.04)] transition-all active:scale-95 disabled:opacity-50",
             isAdd 
@@ -117,7 +125,7 @@ function PiggyBankActionModal({ isOpen, onClose, bank, type, accounts, onConfirm
               : "bg-slate-900 text-white shadow-slate-900/20"
           )}
         >
-          Confirmar {isAdd ? "Depósito" : "Retirada"}
+          {isSubmitting ? "Processando..." : `Confirmar ${isAdd ? "Depósito" : "Retirada"}`}
         </button>
       </motion.div>
     </div>
@@ -127,6 +135,15 @@ function PiggyBankActionModal({ isOpen, onClose, bank, type, accounts, onConfirm
 function CreatePiggyBankModal({ isOpen, onClose, initialData, onSave, onDelete }: any) {
   const [name, setName] = React.useState(initialData?.name || "");
   const [targetValue, setTargetValue] = React.useState(initialData?.targetValue?.toString() || "");
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+
+  React.useEffect(() => {
+    setName(initialData?.name || "");
+    setTargetValue(initialData?.targetValue?.toString() || "");
+    setIsSubmitting(false);
+    setConfirmingDelete(false);
+  }, [initialData, isOpen]);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-white/60 backdrop-blur-md">
@@ -144,8 +161,8 @@ function CreatePiggyBankModal({ isOpen, onClose, initialData, onSave, onDelete }
           <X size={20} />
         </button>
 
-        <div className="w-16 h-16 rounded-[24px] bg-emerald-50 text-emerald-600 flex items-center justify-center mb-6">
-          <PiggyIcon size={32} strokeWidth={2.5} />
+        <div className="w-16 h-16 rounded-[24px] bg-emerald-50 text-emerald-700 flex items-center justify-center mb-6">
+          <ProPiggyIcon size={32} strokeWidth={2} />
         </div>
 
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">
@@ -181,28 +198,66 @@ function CreatePiggyBankModal({ isOpen, onClose, initialData, onSave, onDelete }
 
         <div className="mt-8 space-y-3">
           <button 
-            onClick={() => onSave({ 
-              name, 
-              targetValue: (parseFloat(targetValue.toString().replace(/\./g, "").replace(",", ".")) || 0),
-              currentValue: initialData?.currentValue || 0,
-              icon: initialData?.icon || '💰',
-              color: initialData?.color || 'bg-[#0B8A46]',
-              status: initialData?.status || 'active',
-              autoSave: initialData?.autoSave || false
-            })}
-            disabled={!name || !targetValue}
+            onClick={async () => {
+              if (isSubmitting) return;
+              setIsSubmitting(true);
+              try {
+                await onSave({ 
+                  name: name.trim(), 
+                  targetValue: (parseFloat(targetValue.toString().replace(/\./g, "").replace(",", ".")) || 0),
+                  currentValue: initialData?.currentValue || 0,
+                  icon: initialData?.icon || '💰',
+                  color: initialData?.color || 'bg-[#0B8A46]',
+                  status: initialData?.status || 'active',
+                  autoSave: initialData?.autoSave || false
+                });
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+            disabled={isSubmitting || !name.trim() || !targetValue}
             className="w-full py-5 rounded-[32px] bg-emerald-600 text-white font-black text-lg shadow-[0_8px_30px_rgba(0,0,0,0.04)] shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
           >
-            Salvar
+            {isSubmitting ? "Salvando..." : "Salvar"}
           </button>
           
-          {initialData && (
+          {initialData && !confirmingDelete && (
             <button 
-              onClick={onDelete}
-              className="w-full py-5 rounded-[32px] bg-rose-50 text-rose-500 font-bold text-sm transition-all active:scale-95"
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={isSubmitting}
+              className="w-full py-4 rounded-[32px] bg-rose-50 text-rose-500 font-bold text-sm transition-all active:scale-95"
             >
               Excluir Cofrinho
             </button>
+          )}
+
+          {initialData && confirmingDelete && (
+            <div className="flex gap-2">
+              <button 
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                className="flex-1 py-4 rounded-[32px] bg-gray-100 text-slate-700 font-bold text-sm"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button"
+                onClick={async () => {
+                  if (isSubmitting) return;
+                  setIsSubmitting(true);
+                  try {
+                    await onDelete();
+                  } finally {
+                    setIsSubmitting(false);
+                  }
+                }}
+                disabled={isSubmitting}
+                className="flex-1 py-4 rounded-[32px] bg-rose-600 text-white font-bold text-sm"
+              >
+                Confirmar Exclusão
+              </button>
+            </div>
           )}
         </div>
       </motion.div>
@@ -294,7 +349,11 @@ export default function PiggyBanks() {
   const { accounts } = useContas();
   
   const [view, setView] = useState<"list" | "detail">("list");
-  const [selectedBank, setSelectedBank] = useState<PiggyBank | null>(null);
+  const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
+  const selectedBank = useMemo(
+    () => piggyBanks.find(b => b.id === selectedBankId) || null,
+    [piggyBanks, selectedBankId]
+  );
   
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isActionModalOpen, setIsActionModalOpen] = useState(false);
@@ -315,16 +374,15 @@ export default function PiggyBanks() {
 
   const renderEmptyState = () => (
     <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="w-48 h-48 mb-8 relative">
-        <div className="absolute inset-0 bg-emerald-100 rounded-full blur-3xl opacity-50"></div>
-        <img src={PremiumPiggyBankImg} alt="Porquinho 3D" className="w-full h-full object-contain relative z-10" />
+      <div className="mb-8 flex items-center justify-center">
+        <AnimatedPiggy progress={72} size={184} interactive={true} showRing={true} showHint={false} />
       </div>
       <h2 className="text-2xl font-bold text-slate-900 mb-2">Comece a guardar para seus sonhos</h2>
       <p className="text-slate-500 mb-8 max-w-xs font-medium leading-relaxed">
         Crie seu primeiro cofrinho e acompanhe sua evolução de forma inteligente.
       </p>
       <button 
-        onClick={() => { setSelectedBank(null); setIsCreateModalOpen(true); }}
+        onClick={() => { setSelectedBankId(null); setIsCreateModalOpen(true); }}
         className="bg-emerald-600 text-white font-black px-8 py-5 rounded-full shadow-[0_8px_30px_rgba(11,138,70,0.3)] active:scale-95 transition-transform"
       >
         Criar meu cofrinho
@@ -347,23 +405,23 @@ export default function PiggyBanks() {
               return (
                 <div 
                   key={bank.id} 
-                  onClick={() => { setSelectedBank(bank); setView("detail"); }}
+                  onClick={() => { setSelectedBankId(bank.id); setView("detail"); }}
                   className="bg-white rounded-[32px] p-6 shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all active:scale-95 flex flex-col"
                 >
                   <div className="flex justify-between items-start mb-6">
                     <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center shrink-0 overflow-hidden">
-                         <AnimatedPiggy progress={cappedProgress} size={50} interactive={false} />
+                      <div className="w-14 h-14 rounded-2xl bg-emerald-50/70 flex items-center justify-center shrink-0">
+                         <AnimatedPiggy progress={cappedProgress} size={48} interactive={false} />
                       </div>
                       <div>
                         <h3 className="font-bold text-slate-900 text-lg leading-tight">{bank.name}</h3>
-                        <p className="text-sm font-medium text-slate-400 mt-1">
+                        <p className="text-sm font-medium text-slate-400 mt-1 tabular-nums">
                           {formatCurrency(bank.currentValue)} / {formatCurrency(bank.targetValue)}
                         </p>
                       </div>
                     </div>
                     {isCompleted && (
-                      <div className="bg-emerald-100 text-emerald-600 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
+                      <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
                         Concluído
                       </div>
                     )}
@@ -372,7 +430,7 @@ export default function PiggyBanks() {
                   <div className="mt-auto">
                     <div className="flex justify-between items-end mb-2">
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Progresso</p>
-                      <p className="text-sm font-black text-emerald-600">{Math.round(cappedProgress)}%</p>
+                      <p className="text-sm font-black text-emerald-600 tabular-nums">{Math.round(cappedProgress)}%</p>
                     </div>
                     <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
                       <motion.div 
@@ -389,7 +447,7 @@ export default function PiggyBanks() {
           </div>
 
           <button 
-            onClick={() => { setSelectedBank(null); setIsCreateModalOpen(true); }}
+            onClick={() => { setSelectedBankId(null); setIsCreateModalOpen(true); }}
             className="w-full py-6 rounded-[32px] border-2 border-dashed border-gray-200 text-gray-500 font-bold flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-emerald-200 hover:text-emerald-600 transition-colors active:scale-95"
           >
             <Plus size={24} strokeWidth={3} />
@@ -425,9 +483,8 @@ export default function PiggyBanks() {
           </button>
 
           {isCompleted && (
-            <div className="absolute top-4 left-4 z-20 flex items-center gap-1.5 bg-[#0B8A46] text-white px-3 py-1 rounded-full shadow-lg">
-              <Sparkles size={12} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Objetivo Atingido!</span>
+            <div className="mb-3 inline-flex items-center gap-1.5 bg-[#0B8A46] text-white px-3 py-1 rounded-full text-[11px] font-bold">
+              <span>Objetivo Atingido</span>
             </div>
           )}
 
@@ -435,7 +492,7 @@ export default function PiggyBanks() {
             <div className="w-[45%] flex items-center justify-center relative">
               <AnimatedPiggy 
                 progress={cappedProgress} 
-                size={170} 
+                size={168} 
                 interactive={true} 
               />
             </div>
@@ -443,21 +500,21 @@ export default function PiggyBanks() {
             <div className="w-[55%] flex flex-col justify-center pl-2 space-y-4">
               <div>
                 <p className="text-[13px] font-medium text-slate-500 mb-1">Saldo atual</p>
-                <p className="text-[32px] font-bold text-[#0B8A46] tracking-tight leading-none">{formatCurrency(bank.currentValue)}</p>
+                <p className="text-[32px] font-bold text-[#0B8A46] tracking-tight leading-none tabular-nums">{formatCurrency(bank.currentValue)}</p>
               </div>
 
               <div className="w-full h-[1px] bg-gray-100"></div>
 
               <div>
                 <p className="text-[13px] font-medium text-slate-500 mb-1">Objetivo</p>
-                <p className="text-[17px] font-bold text-slate-900 tracking-tight leading-none">{formatCurrency(bank.targetValue)}</p>
+                <p className="text-[17px] font-bold text-slate-900 tracking-tight leading-none tabular-nums">{formatCurrency(bank.targetValue)}</p>
               </div>
 
               <div className="w-full h-[1px] bg-gray-100"></div>
 
               <div>
                 <p className="text-[13px] font-medium text-slate-500 mb-2">Progresso</p>
-                <p className="text-[22px] font-bold text-[#0B8A46] leading-none mb-2">{Math.round(cappedProgress)}%</p>
+                <p className="text-[22px] font-bold text-[#0B8A46] leading-none mb-2 tabular-nums">{Math.round(cappedProgress)}%</p>
                 <div className="w-full bg-gray-200 h-2.5 rounded-full overflow-hidden">
                   <motion.div 
                     initial={{ width: 0 }}
@@ -614,26 +671,25 @@ export default function PiggyBanks() {
             isOpen={isCreateModalOpen} 
             onClose={() => {
               setIsCreateModalOpen(false);
-              if (view === "list") setSelectedBank(null); // Clear selected if creating new from list
+              if (view === "list") setSelectedBankId(null);
             }} 
             initialData={selectedBank}
             onSave={async (data: any) => {
               if (selectedBank) {
                 const res = await updatePiggyBank(selectedBank.id, data);
-                if (!res) { ((window as any).mostrarMensagem || window.alert)("Erro ao editar cofrinho. Verifique os dados."); return; }
+                if (!res) { ((window as any).mostrarMensagem || (() => {}))("Erro ao editar cofrinho. Verifique os dados."); return; }
               } else {
-                 
                 const res = await createPiggyBank(data); 
-                if (!res) { ((window as any).mostrarMensagem || window.alert)("Erro ao criar cofrinho. Verifique os dados."); return; }
+                if (!res) { ((window as any).mostrarMensagem || (() => {}))("Erro ao criar cofrinho. Verifique os dados."); return; }
               }
               setIsCreateModalOpen(false);
-              if (view === "list") setSelectedBank(null);
+              if (view === "list") setSelectedBankId(null);
             }}
             onDelete={async () => {
-              if (selectedBank && confirm("Deseja realmente excluir este cofrinho?")) {
+              if (selectedBank) {
                 await deletePiggyBank(selectedBank.id);
                 setIsCreateModalOpen(false);
-                setSelectedBank(null);
+                setSelectedBankId(null);
                 setView("list");
               }
             }}

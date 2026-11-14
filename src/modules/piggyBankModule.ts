@@ -1,24 +1,34 @@
 import { db, auth } from "../lib/firebase";
-import { collection, addDoc, updateDoc, doc, deleteDoc, getDoc, runTransaction } from "firebase/firestore";
+import { collection, doc, setDoc, updateDoc, deleteDoc, runTransaction } from "firebase/firestore";
 import { PiggyBank, PiggyBankHistory, Transaction, Account } from "../types";
 import { handleFirestoreError, OperationType } from "../lib/error-handler";
 import { cleanData } from "../lib/utils";
 import { contas } from "./contasModule";
 
 export const piggyBankModule = {
-  async criarCofrinho(userId: string, data: Omit<PiggyBank, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'history'>) {
+  async criarCofrinho(
+    userId: string,
+    data: Omit<PiggyBank, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'history'>,
+    docId?: string
+  ) {
     try {
       const cleanDataObj = cleanData(data);
-      const docRef = await addDoc(collection(db, "piggyBanks"), {
+      const targetRef = docId
+        ? doc(db, "piggyBanks", docId)
+        : doc(collection(db, "piggyBanks"));
+      const nowIso = new Date().toISOString();
+
+      await setDoc(targetRef, {
         ...cleanDataObj,
         userId,
-        currentValue: 0,
-        status: "active",
+        targetValue: Number(cleanDataObj.targetValue || 0),
+        currentValue: Number(cleanDataObj.currentValue || 0),
+        status: cleanDataObj.status === "completed" ? "completed" : "active",
         history: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        createdAt: nowIso,
+        updatedAt: nowIso
       });
-      return docRef.id;
+      return targetRef.id;
     } catch (error) {
       console.error("FIREBASE ERROR CREATE PIGGY:", error); handleFirestoreError(error, OperationType.CREATE, "piggyBanks");
       return null;

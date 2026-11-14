@@ -39,7 +39,8 @@ import {
   Plus,
   Wallet,
   Target,
-  PieChart
+  PieChart,
+  Smile
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "../lib/utils";
@@ -48,6 +49,7 @@ import { signOut, updateProfile, updatePassword, updateEmail } from "firebase/au
 import { collection, query, where, getDocs, deleteDoc, doc, writeBatch, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { CategoryManager } from "./CategoryManager";
 import { useSettings } from "../context/SettingsContext";
+import { UserAvatar } from "./UserAvatar";
 
 interface SettingsProps {
   user: UserProfile | null;
@@ -386,6 +388,12 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
       document.getElementById("import-file-input")?.click();
     } else if (id === "delete_account") {
       handleDeleteAccount();
+    } else if (id === "customize_avatar") {
+      navigate("/avatar");
+    } else if (id === "support") {
+      navigate("/support");
+    } else if (id === "report_bug") {
+      navigate("/support?new=1&category=bug");
     } else if (["accounts", "cards", "goals", "budgeting"].includes(id)) {
       navigate(`/${id}`);
     } else {
@@ -397,7 +405,8 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
     {
       title: "Conta",
       items: [
-        { id: "edit_profile", label: "Editar Perfil", icon: User, description: "Nome e foto de perfil" },
+        { id: "customize_avatar", label: "Personalizar Meu Avatar", icon: Smile, description: "Criar personagem, cores, roupa e moldura" },
+        { id: "edit_profile", label: "Editar Perfil", icon: User, description: "Nome e foto rápida de perfil" },
         { id: "edit_email", label: "E-mail", icon: Mail, description: user?.email || "Alterar e-mail da conta" },
         { id: "change_password", label: "Senha", icon: Key, description: "Alterar sua senha de acesso" },
       ]
@@ -449,6 +458,8 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
     {
       title: "Suporte",
       items: [
+        { id: "support", label: "Falar com Suporte", icon: MessageCircle, description: "Abrir chamado, chat interno ou WhatsApp" },
+        { id: "report_bug", label: "Reportar Problema", icon: AlertCircle, description: "Enviar relato técnico para a equipe" },
         { id: "help_center", label: "Central de Ajuda", icon: HelpCircle, description: "Dúvidas frequentes" },
         { id: "terms", label: "Termos e Políticas", icon: FileText, description: "Políticas de privacidade e termos de uso" },
       ]
@@ -459,6 +470,7 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
     {
       title: "Conta",
       items: [
+        { id: "customize_avatar", label: "Meu Avatar", icon: Smile, description: "Personalizar estilo e visual" },
         { id: "edit_profile", label: "Perfil", icon: User, description: "Alterar nome e foto" },
         { id: "edit_email", label: "Alterar E-mail", icon: Mail, description: user?.email },
         { id: "logout", label: "Sair da Conta", icon: LogOut, description: "Encerrar sessão atual", color: "text-rose-500" },
@@ -493,6 +505,8 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
     {
       title: "Suporte",
       items: [
+        { id: "support", label: "Falar com Suporte", icon: MessageCircle, description: "Chamados e WhatsApp" },
+        { id: "report_bug", label: "Reportar Problema", icon: AlertCircle, description: "Informar erro técnico" },
         { id: "help_center", label: "Sobre o App", icon: HelpCircle, description: "Informações e versão" },
         { id: "terms", label: "Termos e Políticas", icon: FileText, description: "Privacidade e uso" },
       ]
@@ -650,24 +664,33 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
             <div className="space-y-6">
               <div className="bg-white rounded-3xl p-8 border border-neutral-100 shadow-sm text-center">
                 <div 
-                  onClick={() => setActiveModal("edit_profile")}
-                  className="w-20 h-20 rounded-full bg-neutral-50 flex items-center justify-center mx-auto mb-4 border border-neutral-200 shadow-sm overflow-hidden relative group cursor-pointer"
-                  title="Clique para alterar seu avatar ou nome"
+                  onClick={() => navigate("/avatar")}
+                  className="w-20 h-20 rounded-full mx-auto mb-4 relative group cursor-pointer flex items-center justify-center"
+                  title="Clique para personalizar seu avatar"
                 >
-                  {user?.photoURL || profileForm.photoURL ? (
-                    <img src={profileForm.photoURL || user?.photoURL || ""} alt={user?.displayName || ""} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  ) : (
-                    <User className="w-10 h-10 text-neutral-500" />
-                  )}
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <UserAvatar
+                    userProfile={user}
+                    photoURL={profileForm.photoURL || user?.photoURL}
+                    displayName={settings.name || user?.displayName}
+                    size="xl"
+                  />
+                  <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <Camera className="text-white" size={20} />
                   </div>
                 </div>
                 <h3 className="font-semibold text-neutral-800 tracking-tight">{settings.name || user?.displayName || "Usuário"}</h3>
-                <p className="text-xs text-neutral-400 mb-6 font-medium">{user?.email}</p>
+                <p className="text-xs text-neutral-400 mb-5 font-medium">{user?.email}</p>
+                <button
+                  type="button"
+                  onClick={() => navigate("/avatar")}
+                  className="w-full py-2.5 px-4 mb-2.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl font-semibold text-xs hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Smile size={15} />
+                  Personalizar Meu Avatar
+                </button>
                 <button 
                   onClick={handleLogout}
-                  className="mt-2 w-full py-3 bg-neutral-50 text-neutral-600 border border-neutral-200/60 rounded-2xl font-semibold text-sm hover:bg-neutral-100 transition-colors flex items-center justify-center gap-2"
+                  className="w-full py-3 bg-neutral-50 text-neutral-600 border border-neutral-200/60 rounded-2xl font-semibold text-sm hover:bg-neutral-100 transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <LogOut size={16} />
                   Sair da Conta
@@ -814,12 +837,22 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
                         </label>
                       </div>
                       
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveModal(null);
+                            navigate("/avatar");
+                          }}
+                          className="px-4 py-2 bg-[#064E3B] text-white rounded-xl text-xs font-bold hover:bg-emerald-900 transition-all cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Smile size={14} /> Abrir Estúdio do Meu Avatar
+                        </button>
                         <label 
                           htmlFor="avatar-file-input"
                           className="px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-all cursor-pointer flex items-center gap-1.5"
                         >
-                          <Upload size={14} /> Enviar Foto do Dispositivo
+                          <Upload size={14} /> Enviar Foto
                         </label>
                         <input 
                           type="file" 
@@ -1141,12 +1174,23 @@ const Settings: React.FC<SettingsProps> = ({ user, onLogout, categories, subCate
                       <h4 className="font-bold text-slate-900 mb-2">O backup é seguro?</h4>
                       <p className="text-sm text-gray-500">Sim, todos os seus dados são criptografados e armazenados com segurança na nuvem do Google.</p>
                     </div>
-                    <button 
-                      onClick={() => setActiveModal(null)}
-                      className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-black transition-colors cursor-pointer"
-                    >
-                      Fechar
-                    </button>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        onClick={() => {
+                          setActiveModal(null);
+                          navigate("/support");
+                        }}
+                        className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-colors cursor-pointer"
+                      >
+                        Falar com Suporte
+                      </button>
+                      <button 
+                        onClick={() => setActiveModal(null)}
+                        className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-black transition-colors cursor-pointer"
+                      >
+                        Fechar
+                      </button>
+                    </div>
                   </div>
                 )}
 

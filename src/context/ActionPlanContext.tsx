@@ -219,7 +219,7 @@ export function ActionPlanProvider({ children }: { children: ReactNode }) {
             type: transactionType,
             category: category,
             date: new Date().toISOString(),
-            accountId: accountId || (accounts.length > 0 ? accounts[0].id : ""),
+            accountId: accountId || accounts.find(a => a.isDefault)?.id || (accounts.length > 0 ? accounts[0].id : ""),
             reconciled: false,
             createdAt: new Date().toISOString()
           } as any);

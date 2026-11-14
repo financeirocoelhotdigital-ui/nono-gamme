@@ -1,4 +1,35 @@
-import { Type } from "@google/genai";
+export enum Type {
+  TYPE_UNSPECIFIED = "TYPE_UNSPECIFIED",
+  STRING = "STRING",
+  NUMBER = "NUMBER",
+  INTEGER = "INTEGER",
+  BOOLEAN = "BOOLEAN",
+  ARRAY = "ARRAY",
+  OBJECT = "OBJECT",
+  NULL = "NULL",
+}
+
+export enum ThinkingLevel {
+  LOW = "LOW",
+  MEDIUM = "MEDIUM",
+  HIGH = "HIGH",
+  XHIGH = "XHIGH",
+}
+
+export interface Schema {
+  type?: Type;
+  description?: string;
+  enum?: string[];
+  items?: Schema;
+  properties?: Record<string, Schema>;
+  required?: string[];
+}
+
+export interface FunctionDeclaration {
+  name: string;
+  description?: string;
+  parameters?: Schema;
+}
 
 export interface GenerateContentParams {
   model?: string;
@@ -9,18 +40,25 @@ export interface GenerateContentParams {
 export interface GenerateContentResponse {
   text: string;
   functionCalls?: any;
+  modelUsed?: string;
+  temporaryUnavailable?: boolean;
+  notice?: string;
 }
 
 export async function generateContentServer(params: GenerateContentParams): Promise<GenerateContentResponse> {
   const requested = params.model;
-  const isInvalid = !requested || 
-    requested.includes("3.7") || 
-    requested.includes("3.6") || 
-    requested.includes("2.5") || 
-    requested.includes("1.5") || 
+  const isInvalid =
+    !requested ||
+    requested.includes("3.8") ||
+    requested.includes("3.7") ||
+    requested.includes("3.6") ||
+    requested.includes("3.5") ||
+    requested.includes("2.5") ||
+    requested.includes("1.5") ||
     requested.includes("2.0") ||
+    requested.includes("flash-latest") ||
     requested.includes("pro");
-  const model = isInvalid ? "gemini-3.8-flash" : requested;
+  const model = isInvalid ? "gemini-4-hydrogen" : requested;
 
   let lastError: any = null;
   const maxAttempts = 2;
@@ -55,21 +93,24 @@ export async function generateContentServer(params: GenerateContentParams): Prom
       return {
         text: data.text || "",
         functionCalls: data.functionCalls || undefined,
+        modelUsed: data.modelUsed,
+        temporaryUnavailable: data.temporaryUnavailable,
+        notice: data.notice,
       };
     } catch (error: any) {
       lastError = error;
       const msg = String(error?.message || "");
-      const isTransient = msg.includes("Failed to fetch") || 
-        msg.includes("NetworkError") || 
-        msg.includes("503") || 
-        msg.includes("502") || 
+      const isTransient =
+        msg.includes("Failed to fetch") ||
+        msg.includes("NetworkError") ||
+        msg.includes("503") ||
+        msg.includes("502") ||
         msg.includes("504") ||
         msg.includes("high demand") ||
         error?.status === 503 ||
         error?.status === 429;
 
       if (attempt < maxAttempts - 1 && isTransient) {
-        // Wait 1000ms with jitter and retry
         await new Promise((r) => setTimeout(r, 1000 + Math.random() * 500));
         continue;
       }
@@ -77,12 +118,10 @@ export async function generateContentServer(params: GenerateContentParams): Prom
     }
   }
 
-  // Graceful fallback for client requests when service has transient load
   return {
     text: "",
     functionCalls: undefined,
+    temporaryUnavailable: true,
+    notice: lastError?.message,
   };
 }
-
-export { Type };
-

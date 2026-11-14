@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import * as firebaseAdminModule from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
@@ -67,6 +67,28 @@ function deleteLocalUser(uid: string) {
 
 const ANNOUNCEMENTS_FILE = getFilePath("anuncios.json");
 const SETTINGS_FILE = getFilePath("config-sistema.json");
+const SUPPORT_TICKETS_FILE = getFilePath("support-tickets.json");
+
+function loadLocalSupportTickets(): any[] {
+  try {
+    if (fs.existsSync(SUPPORT_TICKETS_FILE)) {
+      const content = fs.readFileSync(SUPPORT_TICKETS_FILE, "utf8");
+      const parsed = JSON.parse(content);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (e) {
+    console.warn("Could not read support-tickets.json:", e);
+  }
+  return [];
+}
+
+function saveLocalSupportTickets(tickets: any[]) {
+  try {
+    fs.writeFileSync(SUPPORT_TICKETS_FILE, JSON.stringify(tickets, null, 2), "utf8");
+  } catch (e) {
+    console.error("Could not write support-tickets.json:", e);
+  }
+}
 
 function loadLocalAnnouncements(): any[] {
   try {
@@ -1197,6 +1219,257 @@ app.use(express.json({ limit: "20mb" }));
     }
   });
 
+  // 11. Support Tickets System (User & Admin)
+  app.get("/api/support/tickets", async (req, res) => {
+    try {
+      const userId = String(req.query.userId || "").trim();
+      const userEmail = String(req.query.userEmail || "").toLowerCase().trim();
+      if (!userId && !userEmail) {
+        return res.json({ tickets: [] });
+      }
+
+      const ticketMap = new Map<string, any>();
+      const localTickets = loadLocalSupportTickets();
+      for (const t of localTickets) {
+        const matchesUser =
+          (userId && t.userId === userId) ||
+          (userEmail && String(t.userEmail || "").toLowerCase().trim() === userEmail);
+        if (matchesUser && t.id) {
+          ticketMap.set(t.id, t);
+        }
+      }
+
+      const firestore = getAdminFirestore();
+      if (firestore && userId) {
+        try {
+          const snap = await firestore
+            .collection("support_tickets")
+            .where("userId", "==", userId)
+            .get();
+          snap.forEach((d: any) => {
+            ticketMap.set(d.id, { id: d.id, ...d.data() });
+          });
+        } catch (fsErr) {}
+      }
+
+      const list = Array.from(ticketMap.values()).sort((a, b) =>
+        String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || ""))
+      );
+      return res.json({ tickets: list });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Erro ao buscar chamados." });
+    }
+  });
+
+  app.post("/api/support/tickets", async (req, res) => {
+    try {
+      const {
+        id,
+        protocol,
+        userId,
+        userName,
+        userEmail,
+        subject,
+        category,
+        priority,
+        description,
+      } = req.body || {};
+
+      if (!userId || !subject || !description) {
+        return res.status(400).json({ error: "Dados obrigatórios do chamado não preenchidos." });
+      }
+
+      const now = new Date().toISOString();
+      const ticketId =
+        typeof id === "string" && id.trim()
+          ? id.trim()
+          : `sup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const ticketProtocol =
+        typeof protocol === "string" && protocol.trim()
+          ? protocol.trim()
+          : `SUP-${now.slice(0, 10).replace(/-/g, "")}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const validCategories = ["duvida", "bug", "financeiro", "sugestao", "conta"];
+      const validPriorities = ["baixa", "normal", "alta", "urgente"];
+
+      const ticket = {
+        id: ticketId,
+        protocol: ticketProtocol,
+        userId: String(userId).slice(0, 128),
+        userName: String(userName || "Usuário").slice(0, 160),
+        userEmail: String(userEmail || "").slice(0, 200),
+        subject: String(subject).trim().slice(0, 160),
+        category: validCategories.includes(category) ? category : "duvida",
+        priority: validPriorities.includes(priority) ? priority : "normal",
+        status: "aberto",
+        description: String(description).trim().slice(0, 4000),
+        messages: [
+          {
+            id: `msg_${Date.now()}`,
+            senderRole: "user",
+            senderName: String(userName || "Usuário").slice(0, 160),
+            senderEmail: String(userEmail || "").slice(0, 200),
+            text: String(description).trim().slice(0, 4000),
+            createdAt: now,
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const existing = loadLocalSupportTickets().filter((t) => t.id !== ticket.id);
+      existing.unshift(ticket);
+      saveLocalSupportTickets(existing);
+
+      const firestore = getAdminFirestore();
+      if (firestore) {
+        try {
+          await firestore.collection("support_tickets").doc(ticket.id).set(ticket, { merge: true });
+        } catch (fsErr) {}
+      }
+
+      return res.json({ success: true, ticket });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Erro ao registrar chamado de suporte." });
+    }
+  });
+
+  app.post("/api/support/tickets/:id/reply", async (req, res) => {
+    try {
+      const ticketId = String(req.params.id || "").trim();
+      const { senderRole, senderName, senderEmail, text, status } = req.body || {};
+      if (!ticketId || !text || !String(text).trim()) {
+        return res.status(400).json({ error: "Mensagem inválida." });
+      }
+
+      const role = senderRole === "admin" ? "admin" : "user";
+      const now = new Date().toISOString();
+      const msg = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        senderRole: role,
+        senderName: String(senderName || (role === "admin" ? "Equipe de Suporte" : "Usuário")).slice(0, 160),
+        senderEmail: String(senderEmail || "").slice(0, 200),
+        text: String(text).trim().slice(0, 4000),
+        createdAt: now,
+      };
+
+      const localTickets = loadLocalSupportTickets();
+      let target = localTickets.find((t) => t.id === ticketId);
+
+      const firestore = getAdminFirestore();
+      if (!target && firestore) {
+        try {
+          const snap = await firestore.collection("support_tickets").doc(ticketId).get();
+          if (snap.exists) {
+            target = { id: snap.id, ...snap.data() };
+          }
+        } catch (fsErr) {}
+      }
+
+      if (!target) {
+        return res.status(404).json({ error: "Chamado não encontrado." });
+      }
+
+      const validStatuses = ["aberto", "em_atendimento", "resolvido", "fechado"];
+      const nextStatus = validStatuses.includes(status)
+        ? status
+        : role === "admin"
+        ? "em_atendimento"
+        : target.status === "resolvido" || target.status === "fechado"
+        ? "aberto"
+        : target.status;
+
+      const updatedTicket = {
+        ...target,
+        status: nextStatus,
+        updatedAt: now,
+        messages: [...(Array.isArray(target.messages) ? target.messages : []), msg].slice(-200),
+      };
+
+      const nextList = [updatedTicket, ...localTickets.filter((t) => t.id !== ticketId)];
+      saveLocalSupportTickets(nextList);
+
+      if (firestore) {
+        try {
+          await firestore.collection("support_tickets").doc(ticketId).set(updatedTicket, { merge: true });
+        } catch (fsErr) {}
+      }
+
+      return res.json({ success: true, ticket: updatedTicket });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Erro ao enviar resposta." });
+    }
+  });
+
+  app.get("/api/admin/support-tickets", verifyAdmin, async (req, res) => {
+    try {
+      const ticketMap = new Map<string, any>();
+      for (const t of loadLocalSupportTickets()) {
+        if (t?.id) ticketMap.set(t.id, t);
+      }
+
+      const firestore = getAdminFirestore();
+      if (firestore) {
+        try {
+          const snap = await firestore.collection("support_tickets").get();
+          snap.forEach((d: any) => {
+            ticketMap.set(d.id, { id: d.id, ...d.data() });
+          });
+        } catch (fsErr) {}
+      }
+
+      const tickets = Array.from(ticketMap.values()).sort((a, b) =>
+        String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || ""))
+      );
+      return res.json({ tickets });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Erro ao listar chamados." });
+    }
+  });
+
+  app.patch("/api/admin/support-tickets/:id", verifyAdmin, async (req, res) => {
+    try {
+      const ticketId = String(req.params.id || "").trim();
+      const { status } = req.body || {};
+      const validStatuses = ["aberto", "em_atendimento", "resolvido", "fechado"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: "Status inválido." });
+      }
+
+      const localTickets = loadLocalSupportTickets();
+      let target = localTickets.find((t) => t.id === ticketId);
+
+      const firestore = getAdminFirestore();
+      if (!target && firestore) {
+        try {
+          const snap = await firestore.collection("support_tickets").doc(ticketId).get();
+          if (snap.exists) target = { id: snap.id, ...snap.data() };
+        } catch (fsErr) {}
+      }
+
+      if (!target) {
+        return res.status(404).json({ error: "Chamado não encontrado." });
+      }
+
+      const updatedTicket = {
+        ...target,
+        status,
+        updatedAt: new Date().toISOString(),
+      };
+      saveLocalSupportTickets([updatedTicket, ...localTickets.filter((t) => t.id !== ticketId)]);
+
+      if (firestore) {
+        try {
+          await firestore.collection("support_tickets").doc(ticketId).set(updatedTicket, { merge: true });
+        } catch (fsErr) {}
+      }
+
+      return res.json({ success: true, ticket: updatedTicket });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Erro ao atualizar status do chamado." });
+    }
+  });
+
   // API route for Gemini AI requests (server-side proxy) with retry and model fallback
   app.post("/api/gemini/generate", async (req, res) => {
     try {
@@ -1207,24 +1480,27 @@ app.use(express.json({ limit: "20mb" }));
       }
 
       const { model, contents, config } = req.body;
-      
-      // Determine candidate models list with graceful free-tier compatible fallbacks
-      let primaryModel = model || "gemini-3.8-flash";
-      if (
-        !primaryModel ||
-        primaryModel.includes("3.7") ||
-        primaryModel.includes("2.5") ||
-        primaryModel.includes("3.6") ||
-        primaryModel.includes("1.5") ||
-        primaryModel.includes("2.0") ||
-        primaryModel.includes("pro") ||
-        primaryModel.includes("8b")
-      ) {
-        primaryModel = "gemini-3.8-flash";
+
+      // Normalize to valid active Gemini models (per gemini-api guidelines)
+      const requestedModel = typeof model === "string" ? model.trim() : "";
+      const isDeprecatedOrInvalid =
+        !requestedModel ||
+        requestedModel.includes("1.5") ||
+        requestedModel.includes("2.0") ||
+        requestedModel.includes("2.5") ||
+        requestedModel.includes("3.5") ||
+        requestedModel.includes("3.6") ||
+        requestedModel.includes("3.7") ||
+        requestedModel.includes("3.8") ||
+        requestedModel.includes("flash-latest") ||
+        requestedModel.includes("8b");
+
+      let primaryModel = isDeprecatedOrInvalid ? "gemini-4-hydrogen" : requestedModel;
+      if (primaryModel !== "gemini-4-hydrogen" && primaryModel !== "gemini-3.1-flash-lite") {
+        primaryModel = "gemini-4-hydrogen";
       }
 
-      // Safe free-tier candidate models (strictly non-paid models)
-      const allowedFreeTierModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
+      const allowedFreeTierModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
       const candidateModels: string[] = [primaryModel];
       for (const m of allowedFreeTierModels) {
         if (!candidateModels.includes(m)) {
@@ -1241,17 +1517,53 @@ app.use(express.json({ limit: "20mb" }));
         },
       });
 
+      const buildModelConfig = (targetModel: string, rawConfig: any) => {
+        if (!rawConfig || typeof rawConfig !== "object") return undefined;
+        const sanitized: Record<string, any> = { ...rawConfig };
+        // Remove deprecated sampling / unsupported parameters for Gemini 4
+        delete sanitized.temperature;
+        delete sanitized.topP;
+        delete sanitized.topK;
+        delete sanitized.candidateCount;
+        if (sanitized.thinkingConfig && typeof sanitized.thinkingConfig === "object") {
+          const tc = { ...sanitized.thinkingConfig };
+          delete tc.thinkingBudget;
+          const level = String(tc.thinkingLevel || "").toUpperCase();
+          if (targetModel === "gemini-4-hydrogen") {
+            if (level === "XHIGH") tc.thinkingLevel = ThinkingLevel.XHIGH;
+            else if (level === "HIGH") tc.thinkingLevel = ThinkingLevel.HIGH;
+            else if (level === "MEDIUM") tc.thinkingLevel = ThinkingLevel.MEDIUM;
+            else if (level === "LOW") tc.thinkingLevel = ThinkingLevel.LOW;
+            else delete tc.thinkingLevel;
+          } else {
+            // gemini-3.1-flash-lite does not support XHIGH
+            if (level === "HIGH" || level === "XHIGH") tc.thinkingLevel = ThinkingLevel.HIGH;
+            else if (level === "MEDIUM") tc.thinkingLevel = ThinkingLevel.MEDIUM;
+            else if (level === "LOW") tc.thinkingLevel = ThinkingLevel.LOW;
+            else if (level === "MINIMAL") tc.thinkingLevel = ThinkingLevel.MINIMAL;
+            else delete tc.thinkingLevel;
+          }
+          if (Object.keys(tc).length > 0) {
+            sanitized.thinkingConfig = tc;
+          } else {
+            delete sanitized.thinkingConfig;
+          }
+        }
+        return sanitized;
+      };
+
       let lastError: any = null;
       let lastResponse: any = null;
 
-      // Attempt across candidate free-tier models with exponential backoff on transient errors
+      // Attempt across candidate models with exponential backoff on transient errors
       for (const currentModel of candidateModels) {
+        const modelConfig = buildModelConfig(currentModel, config);
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
             lastResponse = await ai.models.generateContent({
               model: currentModel,
               contents,
-              config,
+              config: modelConfig,
             });
 
             if (lastResponse) {
@@ -1276,13 +1588,11 @@ app.use(express.json({ limit: "20mb" }));
             }
 
             if (attempt === 1 && (isHighDemand || isRateLimited)) {
-              // High demand or rate limits are usually transient spikes. Wait with backoff and retry once.
               const waitMs = 1000 + Math.floor(Math.random() * 600);
               await new Promise((resolve) => setTimeout(resolve, waitMs));
               continue;
             }
 
-            // On attempt 2, switch to next candidate model with a brief pause
             await new Promise((resolve) => setTimeout(resolve, 300));
             break;
           }

@@ -790,5 +790,44 @@ service cloud.firestore {
     match /config_sistema/{id} {
       allow read, write: if true;
     }
+
+    function isValidSupportTicket(data) {
+      return data.userId is string &&
+             data.userId.size() <= 128 &&
+             data.protocol is string &&
+             data.protocol.size() <= 40 &&
+             data.subject is string &&
+             data.subject.size() >= 2 &&
+             data.subject.size() <= 160 &&
+             data.category in ["duvida", "bug", "financeiro", "sugestao", "conta"] &&
+             data.priority in ["baixa", "normal", "alta", "urgente"] &&
+             data.status in ["aberto", "em_atendimento", "resolvido", "fechado"] &&
+             data.description is string &&
+             data.description.size() <= 4000 &&
+             (!('messages' in data) || (data.messages is list && data.messages.size() <= 200));
+    }
+
+    match /support_tickets/{id} {
+      allow get: if isAuthenticated() && (isAdmin() || (resource != null && resource.data.userId == request.auth.uid));
+      allow list: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() &&
+                       isValidSupportTicket(request.resource.data) &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.status == "aberto";
+      allow update: if isAuthenticated() &&
+                       isValidSupportTicket(request.resource.data) &&
+                       (
+                         isAdmin() ||
+                         (
+                           resource != null &&
+                           resource.data.userId == request.auth.uid &&
+                           request.resource.data.userId == resource.data.userId &&
+                           request.resource.data.protocol == resource.data.protocol &&
+                           request.resource.data.createdAt == resource.data.createdAt &&
+                           request.resource.data.status in ["aberto", "resolvido", "fechado"]
+                         )
+                       );
+      allow delete: if isAdmin();
+    }
   }
 }

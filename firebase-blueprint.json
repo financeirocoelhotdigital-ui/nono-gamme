@@ -9,6 +9,7 @@
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
+        "avatarConfig": { "type": "object" },
         "createdAt": { "type": "string", "format": "date-time" },
         "onboardingCompleted": { "type": "boolean" },
         "onboardingData": { "type": "object" },
@@ -581,6 +582,40 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "constructionId", "name", "value", "status", "date"]
+    },
+    "SupportTicket": {
+      "title": "Support Ticket",
+      "description": "User support ticket and conversation thread",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "protocol": { "type": "string", "maxLength": 40 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 160 },
+        "userEmail": { "type": "string", "maxLength": 200 },
+        "subject": { "type": "string", "maxLength": 160 },
+        "category": { "type": "string", "enum": ["duvida", "bug", "financeiro", "sugestao", "conta"] },
+        "priority": { "type": "string", "enum": ["baixa", "normal", "alta", "urgente"] },
+        "status": { "type": "string", "enum": ["aberto", "em_atendimento", "resolvido", "fechado"] },
+        "description": { "type": "string", "maxLength": 4000 },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "senderRole": { "type": "string", "enum": ["user", "admin"] },
+              "senderName": { "type": "string" },
+              "senderEmail": { "type": "string" },
+              "text": { "type": "string" },
+              "createdAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "protocol", "subject", "category", "priority", "status", "description", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -612,6 +647,7 @@
     "user_events": { "schema": "UserEvent", "description": "Personal and financial events" },
     "piggyBanks": { "schema": "PiggyBank", "description": "Savings piggy banks" },
     "constructions": { "schema": "Construction", "description": "Constructions for wealth items" },
-    "constructionSteps": { "schema": "ConstructionStep", "description": "Steps for constructions" }
+    "constructionSteps": { "schema": "ConstructionStep", "description": "Steps for constructions" },
+    "support_tickets": { "schema": "SupportTicket", "description": "User support tickets and message threads" }
   }
 }

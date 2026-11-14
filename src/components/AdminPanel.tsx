@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { UserProfile, AdminCliente, AdminAnnouncement, AdminSystemSettings } from "../types";
+import {
+  UserProfile,
+  AdminCliente,
+  AdminAnnouncement,
+  AdminSystemSettings,
+  SupportStatus,
+  SupportTicket,
+} from "../types";
 import {
   ShieldCheck,
   LayoutDashboard,
@@ -22,7 +29,8 @@ import {
   LogOut,
   Sparkles,
   ExternalLink,
-  ArrowLeft
+  ArrowLeft,
+  Headphones
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
@@ -33,6 +41,13 @@ import AdminClientList from "./admin/AdminClientList";
 import AdminClientForm from "./admin/AdminClientForm";
 import AdminAnnouncements from "./admin/AdminAnnouncements";
 import AdminSettings from "./admin/AdminSettings";
+import AdminSupport from "./admin/AdminSupport";
+import {
+  fetchAllAdminTickets,
+  mergeAndSortTickets,
+  replyToSupportTicket,
+  updateSupportTicketStatus,
+} from "../services/supportService";
 
 interface AdminPanelProps {
   userProfile: UserProfile | null;
@@ -63,9 +78,9 @@ export default function AdminPanel({ userProfile, onLogout, mostrarMensagem }: A
     navigate("/login", { replace: true });
   };
 
-  // Active Tab: dashboard | clients | create | announcements | settings
+  // Active Tab: dashboard | clients | create | announcements | support | settings
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "clients" | "create" | "announcements" | "settings"
+    "dashboard" | "clients" | "create" | "announcements" | "support" | "settings"
   >("dashboard");
 
   // State
@@ -73,6 +88,8 @@ export default function AdminPanel({ userProfile, onLogout, mostrarMensagem }: A
   const [loadingClients, setLoadingClients] = useState(false);
   const [announcements, setAnnouncements] = useState<AdminAnnouncement[]>([]);
   const [loadingAnnouncements, setLoadingAnnouncements] = useState(false);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [loadingSupportTickets, setLoadingSupportTickets] = useState(false);
   const [settings, setSettings] = useState<AdminSystemSettings>({
     modoManutencao: false,
     mensagemManutencao: "O sistema Bolso+ está em manutenção programada para melhorias. Voltaremos em breve!",
@@ -326,13 +343,25 @@ export default function AdminPanel({ userProfile, onLogout, mostrarMensagem }: A
     }
   }, [isAdmin, apiCall]);
 
+  const fetchSupportTickets = useCallback(async () => {
+    if (!isAdmin) return;
+    setLoadingSupportTickets(true);
+    try {
+      const list = await fetchAllAdminTickets(userEmail);
+      setSupportTickets(list);
+    } finally {
+      setLoadingSupportTickets(false);
+    }
+  }, [isAdmin, userEmail]);
+
   useEffect(() => {
     if (isAdmin) {
       fetchClients();
       fetchAnnouncements();
       fetchSettings();
+      fetchSupportTickets();
     }
-  }, [isAdmin, fetchClients, fetchAnnouncements, fetchSettings]);
+  }, [isAdmin, fetchClients, fetchAnnouncements, fetchSettings, fetchSupportTickets]);
 
   // Handle Create User Submit with dual backend + direct Firestore redundancy
   const handleCreateUser = async (formData: {
@@ -1047,6 +1076,20 @@ export default function AdminPanel({ userProfile, onLogout, mostrarMensagem }: A
             </button>
 
             <button
+              onClick={() => setActiveTab("support")}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === "support"
+                  ? "bg-slate-900 text-white shadow-xs"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <Headphones size={14} />
+              <span>
+                Suporte ({supportTickets.filter((t) => t.status === "aberto" || t.status === "em_atendimento").length})
+              </span>
+            </button>
+
+            <button
               onClick={() => setActiveTab("settings")}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === "settings"
@@ -1135,6 +1178,37 @@ export default function AdminPanel({ userProfile, onLogout, mostrarMensagem }: A
                 onDeleteAnnouncement={handleDeleteAnnouncement}
                 onToggleStatus={handleToggleAnnouncementStatus}
                 saving={savingAnnouncement}
+              />
+            </motion.div>
+          )}
+
+          {activeTab === "support" && (
+            <motion.div
+              key="support"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+            >
+              <AdminSupport
+                tickets={supportTickets}
+                loading={loadingSupportTickets}
+                onRefresh={fetchSupportTickets}
+                onReply={async (ticket, text) => {
+                  const updated = await replyToSupportTicket({
+                    ticket,
+                    senderRole: "admin",
+                    senderName: userProfile?.displayName || "Suporte Bolso+",
+                    senderEmail: userEmail,
+                    text,
+                  });
+                  setSupportTickets((prev) => mergeAndSortTickets([updated], prev));
+                  notify("Resposta enviada ao usuário!");
+                }}
+                onUpdateStatus={async (ticket, status: SupportStatus) => {
+                  const updated = await updateSupportTicketStatus(ticket, status, userEmail);
+                  setSupportTickets((prev) => mergeAndSortTickets([updated], prev));
+                  notify("Status do chamado atualizado.");
+                }}
               />
             </motion.div>
           )}

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Transaction, Account, Emotion, Category, SubCategory, Tag as TagType } from "../types";
 import { auth, db } from "../lib/firebase";
@@ -488,7 +488,8 @@ export function IncomeForm({
   subCategories, 
   tags, 
   transactions,
-  initialData 
+  initialData,
+  defaultAccountId
 }: { 
   onClose: () => void, 
   accounts: Account[], 
@@ -496,16 +497,23 @@ export function IncomeForm({
   subCategories: SubCategory[],
   tags: TagType[],
   transactions: Transaction[],
-  initialData?: Transaction 
+  initialData?: Transaction,
+  defaultAccountId?: string
 }) {
   const { addCategory: contextAddCategory, addSubCategory: contextAddSubCategory } = useCategorias();
+  const preferredAccount =
+    (defaultAccountId ? accounts.find(a => a.id === defaultAccountId) : undefined) ||
+    accounts.find(a => a.isDefault && a.active !== false) ||
+    accounts.find(a => a.isDefault) ||
+    accounts.find(a => a.active !== false) ||
+    accounts[0];
   const [value, setValue] = useState(initialData?.value.toString() || "");
   const [category, setCategory] = useState(initialData?.category || "");
   const [subCategory, setSubCategory] = useState(initialData?.subCategory || "");
   const [incomeSource, setIncomeSource] = useState(initialData?.incomeSource || "");
   const [incomeType, setIncomeType] = useState<"fixa" | "variavel">(initialData?.incomeType as any || "fixa");
   const [date, setDate] = useState(formatDateForInput(initialData?.date));
-  const [accountId, setAccountId] = useState(initialData?.accountId || "");
+  const [accountId, setAccountId] = useState(initialData?.accountId || preferredAccount?.id || "");
   const [fixed, setFixed] = useState(initialData?.fixed || false);
   const [notes, setNotes] = useState(initialData?.notes || "");
   const [selectedTags, setSelectedTags] = useState<string[]>(initialData?.tags || []);
@@ -517,6 +525,18 @@ export function IncomeForm({
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showInlineAddSubCategory, setShowInlineAddSubCategory] = useState(false);
   const [newSubCategoryName, setNewSubCategoryName] = useState("");
+
+  useEffect(() => {
+    if (!initialData && !accountId && accounts.length > 0) {
+      const def =
+        (defaultAccountId ? accounts.find(a => a.id === defaultAccountId) : undefined) ||
+        accounts.find(a => a.isDefault && a.active !== false) ||
+        accounts.find(a => a.isDefault) ||
+        accounts.find(a => a.active !== false) ||
+        accounts[0];
+      if (def) setAccountId(def.id);
+    }
+  }, [accounts, accountId, initialData, defaultAccountId]);
 
   const handleInlineAddCategory = async () => {
     const catName = newCategoryName.trim();
@@ -910,7 +930,7 @@ export function IncomeForm({
                 className="w-full rounded-xl border-none bg-gray-50 py-3 px-4 text-sm focus:ring-2 focus:ring-emerald-500/20"
               >
                 <option value="">Selecionar conta...</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.isDefault ? " ★ (Principal)" : ""}</option>)}
               </select>
             </div>
           </div>

@@ -35,8 +35,11 @@ import {
   Award,
   Menu,
   Landmark,
-  PiggyBank as PiggyIcon
+  Headphones,
+  Smile
 } from "lucide-react";
+import { ProPiggyIcon } from "./AnimatedPiggy";
+import { UserAvatar } from "./UserAvatar";
 import { UserProfile, AIMode, Debt, Receivable } from "../types";
 import { cn, getDaysRemaining } from "../lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -160,7 +163,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
         items: [
           { id: "wealth", label: "Patrimônio", icon: Briefcase },
           { id: "investments", label: "Investimentos", icon: Landmark },
-          { id: "piggy_banks", label: "Cofrinho", icon: PiggyIcon },
+          { id: "piggy_banks", label: "Cofrinho", icon: ProPiggyIcon },
           { id: "goals", label: "Metas", icon: Target },
           { id: "emergency_reserve", label: "R. Emergência", icon: ShieldCheck },
           { id: "life_planning", label: "Plano de Vida", icon: Heart },
@@ -196,6 +199,8 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
           { id: "categories", label: "Categorias", icon: Tags },
           { id: "history", label: "Histórico Global", icon: History },
           { id: "settings", label: "Configurações", icon: Settings },
+          { id: "avatar", label: "Meu Avatar", icon: Smile },
+          { id: "support", label: "Falar com Suporte", icon: Headphones },
           { id: "landing", label: "Apresentação do App", icon: Sparkles },
         ]
       }
@@ -271,13 +276,16 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
           <div className="px-4 mb-3">
             <div className="bg-emerald-950/60 rounded-2xl p-3 border border-emerald-800/80 shadow-xs">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-900/90 flex-shrink-0 flex items-center justify-center overflow-hidden border border-emerald-700/80 shadow-xs text-white">
-                  {user?.photoURL ? (
-                    <img src={user.photoURL} alt={user.displayName || ""} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  ) : (
-                    <span className="text-emerald-200 font-black text-xs">{user?.displayName?.charAt(0) || "U"}</span>
-                  )}
-                </div>
+                <UserAvatar
+                  userProfile={user}
+                  size="sm"
+                  className="rounded-xl border border-emerald-700/80 shadow-xs"
+                  onClick={() => {
+                    setActiveTab("avatar");
+                    onClose();
+                  }}
+                  title="Personalizar Meu Avatar"
+                />
                 <div className="flex-1 min-w-0">
                   <h2 className="text-xs font-black text-white truncate tracking-tight">
                     {user?.displayName || "Usuário"}

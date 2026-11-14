@@ -27,11 +27,36 @@ export interface FinancialProfile {
   activityArea: string;
 }
 
+export type AvatarBaseStyle = "pessoa" | "bot" | "monograma";
+export type AvatarBackgroundMode = "solido" | "gradiente";
+export type AvatarFrameStyle = "nenhuma" | "anel" | "duplo" | "destaque";
+export type AvatarHairStyle = "curto" | "ondulado" | "longo" | "cacheado" | "coque" | "topete" | "raspado";
+export type AvatarExpression = "sorridente" | "confiante" | "tranquilo" | "piscadela" | "focado";
+export type AvatarAccessory = "nenhum" | "oculos_classico" | "oculos_redondo" | "oculos_sol" | "fones" | "bone";
+export type AvatarOutfit = "blazer" | "camiseta" | "moletom" | "gola_alta";
+
+export interface AvatarConfig {
+  style: AvatarBaseStyle;
+  bgColor: string;
+  bgColorSecondary: string;
+  bgMode: AvatarBackgroundMode;
+  frameStyle: AvatarFrameStyle;
+  frameColor: string;
+  skinTone: string;
+  hairStyle: AvatarHairStyle;
+  hairColor: string;
+  expression: AvatarExpression;
+  accessory: AvatarAccessory;
+  outfit: AvatarOutfit;
+  outfitColor: string;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
   displayName?: string;
   photoURL?: string;
+  avatarConfig?: AvatarConfig;
   createdAt: string;
   onboardingCompleted?: boolean;
   onboardingData?: OnboardingData;
@@ -58,6 +83,7 @@ export interface UserSettings {
   dateFormat?: string;
   autoLockTime?: string;
   name?: string;
+  avatarConfig?: AvatarConfig;
   soundEnabled?: boolean;
   vibrationEnabled?: boolean;
 }
@@ -955,5 +981,34 @@ export interface AdminSystemSettings {
   suporteWhatsApp?: string;
   suporteEmail?: string;
   permitirCadastros?: boolean;
+}
+
+export type SupportCategory = "duvida" | "bug" | "financeiro" | "sugestao" | "conta";
+export type SupportPriority = "baixa" | "normal" | "alta" | "urgente";
+export type SupportStatus = "aberto" | "em_atendimento" | "resolvido" | "fechado";
+
+export interface SupportMessage {
+  id: string;
+  senderRole: "user" | "admin";
+  senderName: string;
+  senderEmail?: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  protocol: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  subject: string;
+  category: SupportCategory;
+  priority: SupportPriority;
+  status: SupportStatus;
+  description: string;
+  messages: SupportMessage[];
+  createdAt: string;
+  updatedAt: string;
 }
 

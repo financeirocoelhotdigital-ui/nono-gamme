@@ -1,6 +1,7 @@
-import { generateContentServer, Type } from "./geminiClient";
-import type { FunctionDeclaration } from "@google/genai";
+import { generateContentServer, Type, ThinkingLevel, FunctionDeclaration } from "./geminiClient";
 import { Transaction, UserProfile, AIMode, Receivable, Debtor, ReceivableRisk, CollectionPriority, ReliabilityLevel, FamilyMember, DependencyAnalysis, FamilyIncome, FamilyGoal, FamilyFinancialAnalysis, FinancialEvent, Reminder, Account, Goal, Debt, Budget, CashFlowPoint, StrategicInsight, UserEvent } from "../types";
+
+const AI_MODEL = "gemini-4-hydrogen";
 
 function handleAIError(error: any, context: string) {
   const errorMessage = error?.message || "";
@@ -28,6 +29,7 @@ function handleAIError(error: any, context: string) {
 function safeJsonParse<T>(text: string, fallback: T, context: string): T {
   try {
     let cleaned = text.trim();
+    if (!cleaned) return fallback;
     if (cleaned.startsWith("```")) {
       cleaned = cleaned.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
     }
@@ -45,27 +47,209 @@ function safeJsonParse<T>(text: string, fallback: T, context: string): T {
   }
 }
 
+function toMonthKey(dateStr?: string): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function buildFinancialSnapshot(data: any, userProfile?: UserProfile) {
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+  const daysElapsed = Math.max(1, now.getDate());
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const remainingDays = Math.max(1, daysInMonth - now.getDate());
+
+  const accounts: any[] = data?.accounts || [];
+  const transactions: any[] = data?.transactions || [];
+  const goals: any[] = data?.goals || [];
+  const debts: any[] = data?.debts || [];
+  const budgets: any[] = data?.budgets || data?.budget || [];
+  const cards: any[] = data?.cards || [];
+  const receivables: any[] = data?.receivables || [];
+  const subscriptions: any[] = data?.subscriptions || [];
+  const wealth: any[] = data?.wealth || [];
+  const investments: any[] = data?.investments || [];
+  const reminders: any[] = data?.reminders || [];
+
+  const totalBalance = accounts.reduce((acc, a) => acc + Number(a.balance || 0), 0);
+  const principalAccount = accounts.find(a => a.isDefault) || accounts[0] || null;
+
+  const currentMonthTx = transactions.filter(t => toMonthKey(t.date) === currentMonthKey);
+  const prevMonthTx = transactions.filter(t => toMonthKey(t.date) === prevMonthKey);
+
+  const monthIncome = currentMonthTx.filter(t => t.type === "income").reduce((acc, t) => acc + Number(t.value || 0), 0);
+  const monthExpense = currentMonthTx.filter(t => t.type === "expense").reduce((acc, t) => acc + Number(t.value || 0), 0);
+  const prevMonthIncome = prevMonthTx.filter(t => t.type === "income").reduce((acc, t) => acc + Number(t.value || 0), 0);
+  const prevMonthExpense = prevMonthTx.filter(t => t.type === "expense").reduce((acc, t) => acc + Number(t.value || 0), 0);
+
+  const savingsRatePct = monthIncome > 0 ? Number((((monthIncome - monthExpense) / monthIncome) * 100).toFixed(1)) : 0;
+  const expenseMoMPct = prevMonthExpense > 0 ? Number((((monthExpense - prevMonthExpense) / prevMonthExpense) * 100).toFixed(1)) : null;
+  const dailyBurnRate = Number((monthExpense / daysElapsed).toFixed(2));
+  const projectedMonthExpense = Number((dailyBurnRate * daysInMonth).toFixed(2));
+
+  const currentByCategory: Record<string, number> = {};
+  const prevByCategory: Record<string, number> = {};
+  const emotionalSpend: Record<string, { count: number; total: number }> = {};
+
+  for (const t of currentMonthTx) {
+    if (t.type !== "expense") continue;
+    const cat = t.category || "Outros";
+    currentByCategory[cat] = (currentByCategory[cat] || 0) + Number(t.value || 0);
+    const emo = t.emotion || "neutro";
+    if (!emotionalSpend[emo]) emotionalSpend[emo] = { count: 0, total: 0 };
+    emotionalSpend[emo].count += 1;
+    emotionalSpend[emo].total += Number(t.value || 0);
+  }
+  for (const t of prevMonthTx) {
+    if (t.type !== "expense") continue;
+    const cat = t.category || "Outros";
+    prevByCategory[cat] = (prevByCategory[cat] || 0) + Number(t.value || 0);
+  }
+
+  const topCategories = Object.entries(currentByCategory)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([category, spent]) => {
+      const prev = prevByCategory[category] || 0;
+      const deltaPct = prev > 0 ? Number((((spent - prev) / prev) * 100).toFixed(1)) : null;
+      return { category, spent: Number(spent.toFixed(2)), previousMonth: Number(prev.toFixed(2)), deltaPct };
+    });
+
+  const activeDebts = debts.filter(d => d.status === "ativa" || (d.remainingValue || 0) > 0);
+  const totalDebtRemaining = activeDebts.reduce((acc, d) => acc + Number(d.remainingValue || 0), 0);
+  const highestInterestDebt = [...activeDebts].sort((a, b) => Number(b.interestRate || 0) - Number(a.interestRate || 0))[0] || null;
+
+  const pendingReceivables = receivables.filter(r => r.status !== "recebido" && Number(r.remainingValue || 0) > 0);
+  const totalReceivablePending = pendingReceivables.reduce((acc, r) => acc + Number(r.remainingValue || 0), 0);
+  const overdueReceivables = pendingReceivables.filter(r => r.status === "atrasado");
+
+  const cardsTotalLimit = cards.reduce((acc, c) => acc + Number(c.limit || 0), 0);
+  const cardsUsedLimit = cards.reduce((acc, c) => acc + Number(c.usedLimit || 0), 0);
+  const cardsUtilizationPct = cardsTotalLimit > 0 ? Number(((cardsUsedLimit / cardsTotalLimit) * 100).toFixed(1)) : 0;
+
+  const activeSubscriptions = subscriptions.filter(s => s.status !== "cancelada");
+  const subscriptionsMonthly = activeSubscriptions.reduce((acc, s) => acc + Number(s.value || 0), 0);
+
+  const budgetAlerts = budgets
+    .map(b => {
+      const spent = currentByCategory[b.categoryName] || Number(b.spentValue || 0);
+      const planned = Number(b.plannedValue || 0);
+      const pct = planned > 0 ? Number(((spent / planned) * 100).toFixed(1)) : 0;
+      return { category: b.categoryName, planned, spent, pctUsed: pct };
+    })
+    .filter(b => b.pctUsed >= 80)
+    .sort((a, b) => b.pctUsed - a.pctUsed);
+
+  const wealthTotal =
+    wealth.reduce((acc, w) => acc + Number(w.value || 0), 0) +
+    investments.reduce((acc, inv) => acc + Number(inv.currentValue || inv.amount || 0), 0);
+
+  const safeDailySpend = Math.max(0, Number(((totalBalance - Math.min(totalDebtRemaining * 0.1, totalBalance * 0.3)) / remainingDays).toFixed(2)));
+
+  return {
+    dataReferencia: now.toISOString().split("T")[0],
+    diasRestantesMes: remainingDays,
+    usuario: {
+      nome: userProfile?.displayName || "Usuário",
+      scoreFinanceiro: userProfile?.financialScore ?? null,
+      rendaDeclarada: userProfile?.onboardingData?.monthlyIncome ?? null,
+      gastosFixosDeclarados: userProfile?.onboardingData?.fixedExpenses ?? null,
+    },
+    contas: {
+      saldoTotal: Number(totalBalance.toFixed(2)),
+      contaPrincipal: principalAccount ? { id: principalAccount.id, nome: principalAccount.name, saldo: principalAccount.balance } : null,
+      quantidade: accounts.length,
+      lista: accounts.map(a => ({ nome: a.name, tipo: a.type, saldo: a.balance, principal: !!a.isDefault })),
+    },
+    mesAtual: {
+      receitas: Number(monthIncome.toFixed(2)),
+      despesas: Number(monthExpense.toFixed(2)),
+      balancoLiquido: Number((monthIncome - monthExpense).toFixed(2)),
+      taxaPoupancaPct: savingsRatePct,
+      variacaoDespesasMesAnteriorPct: expenseMoMPct,
+      mediaGastoDiario: dailyBurnRate,
+      projecaoGastoMes: projectedMonthExpense,
+      limiteSeguroDiario: safeDailySpend,
+    },
+    mesAnterior: {
+      receitas: Number(prevMonthIncome.toFixed(2)),
+      despesas: Number(prevMonthExpense.toFixed(2)),
+    },
+    topCategoriasMesAtual: topCategories,
+    orcamentosEmAlerta: budgetAlerts,
+    gastosPorEmocao: emotionalSpend,
+    dividas: {
+      totalRestante: Number(totalDebtRemaining.toFixed(2)),
+      quantidadeAtivas: activeDebts.length,
+      maiorJuros: highestInterestDebt ? { nome: highestInterestDebt.name, jurosMes: highestInterestDebt.interestRate, saldo: highestInterestDebt.remainingValue } : null,
+    },
+    dinheiroEmprestadoAReceber: {
+      totalPendente: Number(totalReceivablePending.toFixed(2)),
+      quantidadeAbertos: pendingReceivables.length,
+      quantidadeAtrasados: overdueReceivables.length,
+      atrasadosDetalhes: overdueReceivables.map(r => ({ pessoa: r.personName, valorRestante: r.remainingValue, vencimento: r.dueDate })),
+    },
+    cartoesCredito: {
+      limiteTotal: Number(cardsTotalLimit.toFixed(2)),
+      limiteUsado: Number(cardsUsedLimit.toFixed(2)),
+      comprometimentoPct: cardsUtilizationPct,
+    },
+    assinaturasRecorrentes: {
+      custoMensal: Number(subscriptionsMonthly.toFixed(2)),
+      custoAnual: Number((subscriptionsMonthly * 12).toFixed(2)),
+      quantidade: activeSubscriptions.length,
+    },
+    metas: goals.map(g => ({
+      id: g.id,
+      nome: g.name,
+      alvo: g.targetValue,
+      atual: g.currentValue,
+      progressoPct: g.targetValue > 0 ? Number(((g.currentValue / g.targetValue) * 100).toFixed(1)) : 0,
+      prazo: g.deadline,
+      status: g.status,
+    })),
+    patrimonioEInvestimentosTotal: Number(wealthTotal.toFixed(2)),
+    lembretesPendentes: reminders.filter((r: any) => !r.completed && r.status !== "concluido").slice(0, 8),
+  };
+}
+
 const SYSTEM_INSTRUCTIONS = {
-  consultor: `Você é um Consultor Financeiro experiente. Analise os dados financeiros do usuário, sugira melhorias, identifique riscos e ajude no planejamento. Seja prático e direto. Use os dados de renda e gastos fixos do perfil para dar conselhos precisos.`,
-  psicologo: `Você é um Psicólogo Financeiro. Analise o comportamento emocional do usuário em relação aos gastos (feliz, triste, impulsivo, etc.), detecte padrões de consumo emocional e ajude a criar uma relação saudável com o dinheiro.`,
-  planejador: `Você é um Planejador de Vida e Carreira. Ajude o usuário a alinhar suas finanças com seus objetivos de longo prazo (casa, aposentadoria, viagens). Foque em estratégia e visão de futuro.`,
-  hibrido: `Você é um Especialista em Finanças Comportamentais. Combine análise racional, emocional e estratégica para dar conselhos holísticos sobre a vida financeira do usuário.`,
-  copiloto: `Você é o Consultor Financeiro Inteligente do App. Sua missão é analisar os dados reais do usuário e fornecer orientações financeiras profissionais, humanas e acionáveis.
+  consultor: `Você é um Consultor Financeiro Sênior (planejamento CFP / gestão patrimonial) no Brasil.
+DIRETRIZES:
+1. USE OS NÚMEROS EXATOS do snapshot financeiro pré-calculado (saldos em R$, taxas %, variação mensal, juros, metas).
+2. Aplique diagnósticos objetivos (Regra 50/30/20, reserva de emergência de 6 a 12 meses, comprometimento de cartão <30%, custo real de juros).
+3. Entregue recomendações ordenadas por maior impacto financeiro em reais (R$). Nunca dê conselhos genéricos.`,
 
-  DIRETRIZES DE RESPOSTA:
-  1. BASEIE-SE EM DADOS: Nunca dê conselhos genéricos como "economize mais". Diga exatamente ONDE e QUANTO o usuário está gastando com base no histórico real fornecido.
-  2. ANALISE PADRÕES: Identifique se os gastos em uma categoria (ex: Alimentação) aumentaram em relação ao mês anterior ou à semana passada.
-  3. SEJA PROATIVO: Se notar que o saldo está caindo rápido ou que uma meta está em risco, alerte o usuário.
-  4. FOCO EM AÇÃO: Toda análise deve vir acompanhada de uma recomendação prática (ex: "Se reduzir R$200 em Lazer, você quita sua dívida X em 3 meses").
-  5. TOM HUMANO E SIMPLES: Fale como um consultor que se importa, evitando termos técnicos excessivos sem explicação.
-  6. COMPARAÇÃO: Sempre que possível, compare períodos (ex: "Este mês você já gastou 15% a mais que no mesmo período do mês passado").
+  psicologo: `Você é um Psicólogo Financeiro e Especialista em Economia Comportamental.
+DIRETRIZES:
+1. Analise os gatilhos emocionais nas transações (impulsivo, ansioso, triste, feliz, racional) e horários/categorias de consumo.
+2. Mostre exatamente quanto os gastos emocionais ou impulsivos estão custando em R$/mês e no ano.
+3. Combine acolhimento sem culpa com micro-hábitos práticos (regra das 48h, fricção antes da compra, envelope de lazer consciente).`,
 
-  CAPACIDADES TÉCNICAS:
-  - Você tem acesso a Contas, Transações, Metas, Dívidas, Patrimônio e Orçamentos.
-  - Você pode registrar transações e criar metas usando ferramentas.
-  - Você deve calcular métricas (como taxa de poupança, comprometimento de renda) na hora para responder.
+  planejador: `Você é um Planejador Estratégico de Vida, Carreira e Patrimônio de Longo Prazo.
+DIRETRIZES:
+1. Conecte o fluxo de caixa atual com metas de médio/longo prazo, Plano de Vida, patrimônio líquido e liberdade financeira.
+2. Projete prazos concretos: com a taxa de poupança atual em R$/mês, em quantos meses o usuário atinge suas metas ou quita dívidas.
+3. Considere proteção familiar, inflação e custo de oportunidade.`,
 
-  Se o usuário perguntar "Estou gastando muito?", analise o orçamento e as transações recentes antes de responder.`
+  hibrido: `Você é um Estrategista Financeiro Comportamental Completo (racional + emocional + patrimonial).
+DIRETRIZES:
+1. Integre matemática financeira (juros, fluxo de caixa, orçamento), psicologia do consumo e visão de longo prazo em uma resposta coesa.
+2. Aponte 1 vitória atual, 1 risco oculto nos números e 2 ações práticas imediatas com valores em R$.`,
+
+  copiloto: `Você é o Copiloto Financeiro Inteligente de Elite do Bolso+.
+Sua missão é analisar o panorama financeiro COMPLETO e em tempo real do usuário (Contas, Conta Principal, Transações, Orçamentos, Cartões, Dívidas, Dinheiro Emprestado/Recebíveis, Metas, Assinaturas, Patrimônio, Família e Plano de Vida) para entregar respostas cirúrgicas, humanas e executáveis.
+
+DIRETRIZES OBRIGATÓRIAS:
+1. BASEIE-SE 100% NOS DADOS REAIS: Cite nomes de contas, categorias, valores exatos em R$, percentuais de variação vs. mês anterior e prazos reais do snapshot fornecido. Jamais responda de forma vaga.
+2. VISÃO 360° PROATIVA: Conecte os pontos! Ex: se o usuário perguntar se pode gastar, verifique saldo, limite seguro diário, dívidas de juros altos, cartões acima de 30% do limite e recebíveis atrasados.
+3. COMPARAÇÕES E TENDÊNCIAS: Use a comparação com o mês anterior, projeção de fechamento do mês e impacto anualizado de pequenos vazamentos (ex: assinaturas ou gastos impulsivos).
+4. EXECUTOR DE AÇÕES: Quando o usuário pedir explicitamente para registrar um gasto/receita, criar meta, aportar em meta, ajustar orçamento, simular impacto ou criar lembrete, USE A FERRAMENTA (function calling) correspondente imediatamente com dados completos.
+5. CLAREZA E FORMATAÇÃO: Use Markdown limpo (títulos curtos, bullets e **negrito** em valores/ações). Seja direto, prático e empático.`
 };
 
 const tools: { functionDeclarations: FunctionDeclaration[] }[] = [
@@ -73,52 +257,80 @@ const tools: { functionDeclarations: FunctionDeclaration[] }[] = [
     functionDeclarations: [
       {
         name: "registrar_transacao",
-        description: "Registra uma nova transação (receita ou despesa) no sistema.",
+        description: "Registra uma nova transação financeira (receita ou despesa) na conta principal do usuário ou em conta informada.",
         parameters: {
           type: Type.OBJECT,
           properties: {
-            value: { type: Type.NUMBER, description: "Valor da transação" },
-            type: { type: Type.STRING, enum: ["income", "expense"], description: "Tipo da transação" },
-            category: { type: Type.STRING, description: "Categoria da transação" },
-            description: { type: Type.STRING, description: "Descrição ou estabelecimento" },
-            date: { type: Type.STRING, description: "Data no formato YYYY-MM-DD (opcional, padrão hoje)" }
+            value: { type: Type.NUMBER, description: "Valor numérico positivo da transação em reais" },
+            type: { type: Type.STRING, enum: ["income", "expense"], description: "income para receita/entrada, expense para despesa/gasto" },
+            category: { type: Type.STRING, description: "Categoria da transação (ex: Alimentação, Transporte, Salário, Lazer, Moradia, Saúde)" },
+            description: { type: Type.STRING, description: "Descrição clara ou nome do estabelecimento" },
+            date: { type: Type.STRING, description: "Data no formato YYYY-MM-DD (opcional, padrão hoje)" },
+            accountName: { type: Type.STRING, description: "Nome da conta se o usuário especificou (opcional, padrão conta principal)" }
           },
           required: ["value", "type", "category", "description"]
         }
       },
       {
         name: "criar_meta",
-        description: "Cria uma nova meta financeira.",
+        description: "Cria uma nova meta ou objetivo financeiro.",
         parameters: {
           type: Type.OBJECT,
           properties: {
             name: { type: Type.STRING, description: "Nome da meta" },
-            targetValue: { type: Type.NUMBER, description: "Valor alvo a ser poupado" },
-            deadline: { type: Type.STRING, description: "Data limite no formato YYYY-MM-DD" }
+            targetValue: { type: Type.NUMBER, description: "Valor alvo a ser alcançado" },
+            deadline: { type: Type.STRING, description: "Data limite no formato YYYY-MM-DD" },
+            priority: { type: Type.STRING, enum: ["alta", "media", "baixa"], description: "Prioridade da meta" }
           },
           required: ["name", "targetValue", "deadline"]
         }
       },
       {
+        name: "aportar_meta",
+        description: "Adiciona um aporte/valor guardado a uma meta financeira já existente.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            goalName: { type: Type.STRING, description: "Nome (ou parte do nome) da meta existente" },
+            amount: { type: Type.NUMBER, description: "Valor do aporte em reais" }
+          },
+          required: ["goalName", "amount"]
+        }
+      },
+      {
         name: "ajustar_orcamento",
-        description: "Ajusta o valor planejado para uma categoria de orçamento.",
+        description: "Ajusta ou cria o limite planejado de orçamento mensal para uma categoria.",
         parameters: {
           type: Type.OBJECT,
           properties: {
             categoryName: { type: Type.STRING, description: "Nome da categoria" },
-            value: { type: Type.NUMBER, description: "Novo valor planejado" }
+            value: { type: Type.NUMBER, description: "Novo valor planejado mensal" }
           },
           required: ["categoryName", "value"]
         }
       },
       {
-        name: "simular_impacto",
-        description: "Simula o impacto de um gasto ou investimento no saldo futuro e metas.",
+        name: "criar_lembrete",
+        description: "Cria um lembrete de pagamento, cobrança ou tarefa financeira.",
         parameters: {
           type: Type.OBJECT,
           properties: {
-            value: { type: Type.NUMBER, description: "Valor do evento simulado" },
-            description: { type: Type.STRING, description: "O que está sendo simulado" }
+            title: { type: Type.STRING, description: "Título curto do lembrete" },
+            date: { type: Type.STRING, description: "Data do lembrete no formato YYYY-MM-DD" },
+            value: { type: Type.NUMBER, description: "Valor financeiro associado (opcional)" },
+            priority: { type: Type.STRING, enum: ["alta", "media", "baixa"], description: "Prioridade do lembrete" }
+          },
+          required: ["title", "date"]
+        }
+      },
+      {
+        name: "simular_impacto",
+        description: "Simula o impacto de uma compra, gasto ou investimento no saldo, limite diário e reserva do usuário.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            value: { type: Type.NUMBER, description: "Valor do gasto ou investimento simulado" },
+            description: { type: Type.STRING, description: "Descrição do item simulado" }
           },
           required: ["value", "description"]
         }
@@ -140,51 +352,47 @@ export async function generateStrategicInsights(
     userEvents: UserEvent[];
   }
 ): Promise<StrategicInsight[]> {
+  const snapshot = buildFinancialSnapshot(data, userProfile);
   const context = `
-    Usuário: ${userProfile.displayName || "Usuário"}
-    Renda Mensal: ${data.transactions.filter(t => t.type === "income").reduce((acc, t) => acc + t.value, 0)}
-    Despesas Mensais: ${data.transactions.filter(t => t.type === "expense").reduce((acc, t) => acc + t.value, 0)}
-    Saldo Total: ${data.accounts.reduce((acc, a) => acc + a.balance, 0)}
-    Dívidas Ativas: ${data.debts.filter(d => d.status === "ativa").length}
-    Metas Ativas: ${data.goals.filter(g => g.status === "active").length}
-    Orçamento: ${JSON.stringify(data.budgets.map(b => ({ cat: b.categoryName, planned: b.plannedValue })))}
-    Transações Recentes: ${JSON.stringify(data.transactions.slice(0, 30).map(t => ({ desc: t.title, val: t.value, type: t.type, cat: t.category, date: t.date })))}
+    Snapshot Financeiro Consolidado: ${JSON.stringify(snapshot)}
+    Orçamentos Detalhados: ${JSON.stringify(data.budgets.map(b => ({ cat: b.categoryName, planned: b.plannedValue })))}
+    Transações Recentes (amostra): ${JSON.stringify(data.transactions.slice(0, 35).map(t => ({ desc: t.title, val: t.value, type: t.type, cat: t.category, emo: t.emotion, date: t.date })))}
     Eventos/Lembretes: ${JSON.stringify(data.userEvents.slice(0, 10).map(e => ({ name: e.name, date: e.dateInicio, val: e.value })))}
   `;
 
   const prompt = `
-    Como um Estrategista Financeiro de IA de elite, analise os dados financeiros do usuário e gere uma lista de INSIGHTS ESTRATÉGICOS E SUGESTÕES PRÁTICAS.
-    
-    Seus insights devem cobrir:
-    1. Padrões de Gastos: Aumentos significativos, categorias dominantes, gastos fora do padrão.
-    2. Saúde do Orçamento: Categorias estouradas ou próximas do limite.
-    3. Gestão de Dívidas: Priorização e riscos.
-    4. Metas: Progresso e atrasos.
-    5. Fluxo de Caixa: Riscos de saldo negativo no futuro.
-    6. Oportunidades: Onde economizar ou investir melhor.
+    Como um Estrategista Financeiro de IA de elite, analise os números reais do usuário e gere de 4 a 6 INSIGHTS ESTRATÉGICOS ALTAMENTE ACIONÁVEIS.
 
-    Para cada insight, você deve fornecer:
-    - title: Título curto e impactante.
-    - description: O que está acontecendo (o fato).
-    - explanation: Por que isso é um problema ou uma oportunidade.
-    - solution: O que o usuário deve fazer exatamente.
-    - impact: Qual o impacto financeiro esperado (ex: "Economia de R$ 200/mês").
+    Cubra obrigatoriamente os pontos mais críticos encontrados nos dados:
+    1. Padrões de Gastos e Variação Mensal (categorias que mais cresceram ou gastos emocionais/impulsivos).
+    2. Saúde do Orçamento (categorias em alerta ou estouradas).
+    3. Gestão de Dívidas e Cartões (juros mais caros, amortização inteligente).
+    4. Metas e Fluxo de Caixa Futuro (risco de saldo negativo ou atraso de meta).
+    5. Oportunidades concretas com cálculo de economia em R$/mês e R$/ano.
+
+    Para cada insight, forneça:
+    - title: Título curto e específico (com categoria ou valor).
+    - description: O fato exato observado nos números (com R$ e %).
+    - explanation: Por que isso afeta o futuro financeiro do usuário.
+    - solution: Plano exato e mensurável do que fazer hoje.
+    - impact: Impacto financeiro estimado realista (ex: "Economia de R$ 240/mês").
     - priority: "urgente", "importante" ou "informativo".
     - type: "alerta", "sugestao", "padrao" ou "oportunidade".
-    - category: A categoria financeira relacionada.
-    - value: Valor financeiro associado (opcional).
-    - patternDetected: Descrição do padrão identificado (opcional).
+    - category: Categoria financeira relacionada.
+    - value: Valor numérico associado em R$ (opcional).
+    - patternDetected: Padrão comportamental ou recorrente detectado (opcional).
 
-    Retorne APENAS um array JSON de objetos StrategicInsight.
+    Retorne APENAS um array JSON válido de objetos StrategicInsight.
     Contexto: ${context}
   `;
 
   let text = "";
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       contents: prompt,
       config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
         responseMimeType: "application/json"
       }
     });
@@ -212,28 +420,26 @@ export async function getFinancialDiagnosis(
     wealth?: any;
   }
 ): Promise<{ analysis: string; strengths: string[]; weaknesses: string[]; risks: string[]; recommendations: string[] }> {
+  const snapshot = buildFinancialSnapshot(data, userProfile);
   const context = `
-    Usuário: ${userProfile.displayName || "Usuário"}
-    Score Atual: ${userProfile.financialScore || 0}
-    Renda Mensal: ${data.transactions.filter(t => t.type === "income").reduce((acc, t) => acc + t.value, 0)}
-    Despesas Mensais: ${data.transactions.filter(t => t.type === "expense").reduce((acc, t) => acc + t.value, 0)}
-    Saldo Total: ${data.accounts.reduce((acc, a) => acc + a.balance, 0)}
-    Dívidas Ativas: ${data.debts.filter(d => d.status === "ativa").length}
-    Metas Ativas: ${data.goals.filter(g => g.status === "active").length}
-    Patrimônio: ${data.wealth?.reduce((acc: number, w: any) => acc + w.value, 0) || 0}
+    Snapshot Financeiro Consolidado: ${JSON.stringify(snapshot)}
+    Plano de Vida: ${JSON.stringify(data.lifePlan || null)}
+    Família: ${JSON.stringify(data.family || [])}
+    Patrimônio: ${JSON.stringify(data.wealth || [])}
   `;
 
   const prompt = `
-    Como um Consultor Financeiro Expert, realize um diagnóstico completo da saúde financeira deste usuário.
-    Analise os dados fornecidos e gere um relatório estruturado em JSON com as seguintes chaves:
-    - analysis: Um texto curto (2-3 parágrafos) resumindo a situação atual.
-    - strengths: Uma lista de pontos fortes encontrados.
-    - weaknesses: Uma lista de pontos fracos encontrados.
-    - risks: Uma lista de riscos financeiros detectados.
-    - recommendations: Uma lista de ações práticas para melhorar o score e a saúde financeira.
+    Como um Consultor Financeiro Sênior, elabore um DIAGNÓSTICO FINANCEIRO COMPLETO E PERSONALIZADO.
+    Cite valores reais em R$, taxas de poupança, nomes de metas/dívidas e tendências do mês atual vs. mês anterior.
+
+    Gere um JSON estritamente com estas chaves:
+    - analysis: Texto executivo claro (2 a 3 parágrafos objetivos) explicando o momento atual, taxa de poupança, folga ou déficit mensal e tendência patrimonial.
+    - strengths: Lista de 3 a 4 pontos fortes concretos identificados nos números.
+    - weaknesses: Lista de 3 a 4 pontos fracos ou gargalos reais.
+    - risks: Lista de riscos financeiros imediatos e de médio prazo (ex: liquidez baixa, juros rotativos, gastos emocionais).
+    - recommendations: Lista de 4 a 5 ações práticas ordenadas por prioridade, com valores sugeridos em R$.
 
     Contexto: ${context}
-    Seja direto, profissional e motivador.
   `;
 
   let text = "";
@@ -247,9 +453,10 @@ export async function getFinancialDiagnosis(
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       contents: prompt,
       config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.XHIGH },
         responseMimeType: "application/json"
       }
     });
@@ -279,15 +486,27 @@ export async function getAIResponse(
     diagnosis?: any;
     badges?: any[];
     lifePlan?: any;
+    cards?: any[];
+    receivables?: any[];
+    reminders?: any[];
+    investments?: any[];
+    activeTab?: string;
   },
   userMessage: string,
   history: { role: "user" | "model"; parts: { text: string }[] }[] = []
 ) {
+  const snapshot = buildFinancialSnapshot(data, userProfile);
+  const thinkingLevel =
+    mode === "hibrido" || mode === "planejador"
+      ? ThinkingLevel.HIGH
+      : ThinkingLevel.MEDIUM;
+
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
         systemInstruction: SYSTEM_INSTRUCTIONS[mode as keyof typeof SYSTEM_INSTRUCTIONS] || SYSTEM_INSTRUCTIONS.copiloto,
+        thinkingConfig: { thinkingLevel },
         tools: mode === "copiloto" ? tools : undefined,
       },
       contents: [
@@ -296,45 +515,20 @@ export async function getAIResponse(
           role: "user",
           parts: [
             {
-              text: `CONTEXTO FINANCEIRO ATUAL:
-              Perfil: ${JSON.stringify(userProfile)}
-              Saldo Total: ${data.accounts.reduce((acc, a) => acc + a.balance, 0)}
-              Contas: ${JSON.stringify(data.accounts.map(a => ({ name: a.name, balance: a.balance, type: a.type })))}
-              Metas: ${JSON.stringify(data.goals.map(g => ({ name: g.name, target: g.targetValue, current: g.currentValue, deadline: g.deadline })))}
-              Dívidas: ${JSON.stringify(data.debts.map(d => ({ name: d.name, remaining: d.remainingValue, interest: d.interestRate })))}
-              Orçamento: ${JSON.stringify(data.budget || [])}
-              Diagnóstico Atual: ${JSON.stringify(data.diagnosis || {})}
-              Insígnias Conquistadas: ${JSON.stringify(data.badges || [])}
-              Planejamento de Vida: ${JSON.stringify(data.lifePlan || {})}
-              Família: ${JSON.stringify(data.family || [])}
-              Patrimônio: ${JSON.stringify(data.wealth || [])}
-              Assinaturas Mensais: ${JSON.stringify(data.subscriptions.map(s => ({ name: s.name, value: s.value })))}
-              Transações Recentes (últimas 50): ${JSON.stringify(data.transactions.slice(0, 50).map(t => ({ desc: t.title || t.establishment, val: t.value, type: t.type, cat: t.category, date: t.date })))}
-              
-              RESUMO DE GASTOS POR CATEGORIA (Mês Atual): ${JSON.stringify(
-                data.transactions
-                  .filter(t => t.type === "expense" && new Date(t.date).getMonth() === new Date().getMonth() && new Date(t.date).getFullYear() === new Date().getFullYear())
-                  .reduce((acc: any, t) => {
-                    acc[t.category] = (acc[t.category] || 0) + t.value;
-                    return acc;
-                  }, {})
-              )}
-              RESUMO DE GASTOS POR CATEGORIA (Mês Anterior): ${JSON.stringify(
-                data.transactions
-                  .filter(t => {
-                    const d = new Date(t.date);
-                    const now = new Date();
-                    const prevMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
-                    const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-                    return t.type === "expense" && d.getMonth() === prevMonth && d.getFullYear() === prevYear;
-                  })
-                  .reduce((acc: any, t) => {
-                    acc[t.category] = (acc[t.category] || 0) + t.value;
-                    return acc;
-                  }, {})
-              )}
-              
-              MENSAGEM DO USUÁRIO: ${userMessage}`
+              text: `PANORAMA FINANCEIRO PRÉ-CALCULADO (EM TEMPO REAL):
+${JSON.stringify(snapshot)}
+
+TELA ATUAL DO USUÁRIO: ${data.activeTab || "chat"}
+DIAGNÓSTICO RECENTE: ${JSON.stringify(data.diagnosis || {})}
+PLANO DE VIDA: ${JSON.stringify(data.lifePlan || null)}
+FAMÍLIA: ${JSON.stringify(data.family || [])}
+CARTÕES: ${JSON.stringify((data.cards || []).map(c => ({ nome: c.name, limite: c.limit, usado: c.usedLimit, fechamento: c.closingDay, vencimento: c.dueDay })))}
+DÍVIDAS DETALHADAS: ${JSON.stringify((data.debts || []).map(d => ({ nome: d.name, restante: d.remainingValue, jurosMes: d.interestRate, status: d.status, risco: d.riskLevel })))}
+RECEBÍVEIS (DINHEIRO EMPRESTADO): ${JSON.stringify((data.receivables || []).map(r => ({ pessoa: r.personName, restante: r.remainingValue, vencimento: r.dueDate, status: r.status, risco: r.risk })))}
+ASSINATURAS: ${JSON.stringify((data.subscriptions || []).map(s => ({ nome: s.name, valor: s.value, status: s.status })))}
+TRANSAÇÕES RECENTES (últimas 45): ${JSON.stringify((data.transactions || []).slice(0, 45).map(t => ({ desc: t.title || t.establishment, val: t.value, type: t.type, cat: t.category, emo: t.emotion, date: t.date })))}
+
+MENSAGEM DO USUÁRIO: ${userMessage}`
             }
           ]
         }
@@ -358,68 +552,122 @@ export async function getAIResponse(
   }
 }
 
+export async function continueAIConversationAfterTools(
+  mode: AIMode | "copiloto",
+  userMessage: string,
+  toolExecutions: { name: string; args: any; result: string }[],
+  snapshotSummary: any
+): Promise<string> {
+  try {
+    const response = await generateContentServer({
+      model: AI_MODEL,
+      config: {
+        systemInstruction: `${SYSTEM_INSTRUCTIONS[mode as keyof typeof SYSTEM_INSTRUCTIONS] || SYSTEM_INSTRUCTIONS.copiloto}
+Você acabou de executar ações no sistema para o usuário. Confirme brevemente o que foi feito com base nos resultados abaixo e dê 1 insight prático ou alerta relevante sobre o impacto financeiro dessa ação (máximo 2-3 frases curtas em Markdown).`,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `Pedido original: "${userMessage}"
+Ações executadas: ${JSON.stringify(toolExecutions)}
+Resumo financeiro atual: ${JSON.stringify(snapshotSummary)}`
+            }
+          ]
+        }
+      ]
+    });
+    return (response.text || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function generateLocalCopilotResponse(
   userMessage: string,
   data: any,
   userProfile: any
 ): string {
   const query = (userMessage || "").toLowerCase();
-  const accounts = data?.accounts || [];
-  const transactions = data?.transactions || [];
-  const debts = data?.debts || [];
-  const goals = data?.goals || [];
-
-  const totalBalance = accounts.reduce((acc: number, a: any) => acc + (a.balance || 0), 0);
-  const now = new Date();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const remainingDays = Math.max(1, daysInMonth - now.getDate());
-
-  const currentMonthExpenses = transactions
-    .filter((t: any) => t.type === "expense" && new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear())
-    .reduce((acc: number, t: any) => acc + (t.value || 0), 0);
-
-  const currentMonthIncomes = transactions
-    .filter((t: any) => t.type === "income" && new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear())
-    .reduce((acc: number, t: any) => acc + (t.value || 0), 0);
-
-  const totalDebts = debts.filter((d: any) => d.status === "ativa").reduce((acc: number, d: any) => acc + (d.remainingValue || 0), 0);
-
-  const expensesByCategory: Record<string, number> = {};
-  transactions
-    .filter((t: any) => t.type === "expense" && new Date(t.date).getMonth() === now.getMonth())
-    .forEach((t: any) => {
-      const cat = t.category || "Outros";
-      expensesByCategory[cat] = (expensesByCategory[cat] || 0) + (t.value || 0);
-    });
-  const topCategories = Object.entries(expensesByCategory).sort((a, b) => b[1] - a[1]);
+  const snapshot = buildFinancialSnapshot(data, userProfile);
+  const fmt = (v: number) => `R$ ${Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (query.includes("quanto posso gastar") || query.includes("gastar hoje") || query.includes("limite diario")) {
-    const safeDaily = Math.max(0, (totalBalance - (totalDebts > 0 ? totalDebts * 0.1 : 0)) / remainingDays);
-    return `### 💡 Limite de Gasto Sugerido para Hoje\n\n- **Saldo total em contas:** R$ ${totalBalance.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Dias restantes no mês:** ${remainingDays} dias\n- **Valor seguro diário:** **R$ ${safeDaily.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}**\n\n> **Dica do Copiloto:** Mantendo seus gastos médios dentro desse valor diário, você fecha o mês com saldo positivo e sem comprometer suas reservas!`;
+    return `### 💡 Limite Seguro de Gasto para Hoje
+
+- **Saldo total em contas:** ${fmt(snapshot.contas.saldoTotal)}${snapshot.contas.contaPrincipal ? ` (Principal: **${snapshot.contas.contaPrincipal.nome}** — ${fmt(snapshot.contas.contaPrincipal.saldo)})` : ""}
+- **Dias restantes no mês:** ${snapshot.diasRestantesMes} dias
+- **Valor seguro diário:** **${fmt(snapshot.mesAtual.limiteSeguroDiario)}/dia**
+- **Ritmo atual de gasto diário:** ${fmt(snapshot.mesAtual.mediaGastoDiario)}/dia
+
+> **Dica do Copiloto:** Mantendo seus gastos dentro de **${fmt(snapshot.mesAtual.limiteSeguroDiario)}/dia**, você protege seu fechamento mensal sem comprometer suas reservas.`;
   }
 
-  if (query.includes("gastando muito") || query.includes("gasto muito") || query.includes("estou gastando")) {
-    const isSpendingHigh = currentMonthExpenses > currentMonthIncomes && currentMonthIncomes > 0;
-    const topCatText = topCategories.length > 0 
-      ? `A sua maior despesa deste mês é **${topCategories[0][0]}** (R$ ${topCategories[0][1].toLocaleString("pt-BR", { minimumFractionDigits: 2 })}).` 
-      : "Você ainda não possui muitas despesas registradas este mês.";
+  if (query.includes("gastando muito") || query.includes("gasto muito") || query.includes("estou gastando") || query.includes("desperdi")) {
+    const topList = snapshot.topCategoriasMesAtual
+      .slice(0, 3)
+      .map(c => `- **${c.category}:** ${fmt(c.spent)}${c.deltaPct !== null ? ` (${c.deltaPct >= 0 ? "+" : ""}${c.deltaPct}% vs. mês passado)` : ""}`)
+      .join("\n");
 
-    return `### 📊 Análise do Seu Ritmo de Gastos\n\n- **Receitas este mês:** R$ ${currentMonthIncomes.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Despesas este mês:** R$ ${currentMonthExpenses.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Balanço líquido:** R$ ${(currentMonthIncomes - currentMonthExpenses).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n\n${topCatText}\n\n${isSpendingHigh ? "⚠️ **Atenção:** Suas despesas do mês superaram suas receitas até o momento. Recomendamos segurar gastos não essenciais nas próximas semanas." : "✅ **Boa notícia:** Suas despesas estão controladas e abaixo das receitas deste mês!"}`;
+    const isHigh = snapshot.mesAtual.despesas > snapshot.mesAtual.receitas && snapshot.mesAtual.receitas > 0;
+    return `### 📊 Análise do Seu Ritmo de Gastos
+
+- **Receitas no mês:** ${fmt(snapshot.mesAtual.receitas)}
+- **Despesas no mês:** ${fmt(snapshot.mesAtual.despesas)}
+- **Balanço líquido:** ${fmt(snapshot.mesAtual.balancoLiquido)} (Taxa de poupança: **${snapshot.mesAtual.taxaPoupancaPct}%**)
+- **Projeção até o fim do mês:** ${fmt(snapshot.mesAtual.projecaoGastoMes)}
+
+**Maiores categorias do mês:**
+${topList || "- Nenhuma despesa expressiva registrada ainda."}
+
+${isHigh ? "⚠️ **Atenção:** Suas despesas superaram as receitas do mês. Priorize cortar excessos nas categorias acima." : "✅ **Bom controle:** Suas despesas estão abaixo das receitas acumuladas neste mês."}`;
   }
 
-  if (query.includes("divida") || query.includes("dividas") || query.includes("sair das dívidas")) {
-    if (totalDebts === 0) {
-      return `### 🛡️ Situação de Dívidas\n\nParabéns! Você **não possui dívidas ativas registradas** no sistema! 🎉\n\nO próximo passo ideal é focar na formação da sua **Reserva de Emergência** e começar a investir em metas de médio/longo prazo.`;
+  if (query.includes("divida") || query.includes("dívida") || query.includes("sair das")) {
+    if (snapshot.dividas.quantidadeAtivas === 0) {
+      return `### 🛡️ Situação de Dívidas
+
+Você **não possui dívidas ativas registradas** no momento! 🎉
+${snapshot.dinheiroEmprestadoAReceber.totalPendente > 0 ? `\nVocê tem **${fmt(snapshot.dinheiroEmprestadoAReceber.totalPendente)}** em dinheiro emprestado para receber (${snapshot.dinheiroEmprestadoAReceber.quantidadeAtrasados} em atraso).` : ""}
+Foque em fortalecer sua **Reserva de Emergência** e acelerar suas metas.`;
     }
-    return `### 🎯 Plano Estratégico para Quitar Dívidas\n\n- **Total em dívidas ativas:** R$ ${totalDebts.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Quantidade de dívidas:** ${debts.filter((d: any) => d.status === "ativa").length}\n\n**Passo a passo recomendado:**\n1. **Método Avalanche:** Priorize quitar primeiro a dívida com maior taxa de juros para estancar os custos financeiros.\n2. **Renegociação:** Entre em contato com credores para descontos em pagamentos à vista.\n3. **Corte temporário:** Reduza 15% a 20% das despesas não essenciais deste mês e direcione a diferença diretamente para amortização.`;
+    return `### 🎯 Plano Estratégico para Quitar Dívidas
+
+- **Total em dívidas ativas:** ${fmt(snapshot.dividas.totalRestante)} (${snapshot.dividas.quantidadeAtivas} dívida(s))
+${snapshot.dividas.maiorJuros ? `- **Prioridade nº 1 (maior juros):** **${snapshot.dividas.maiorJuros.nome}** (${snapshot.dividas.maiorJuros.jurosMes}% a.m. • Restante: ${fmt(snapshot.dividas.maiorJuros.saldo)})` : ""}
+
+**Próximos passos recomendados:**
+1. **Método Avalanche:** Direcione qualquer sobra para **${snapshot.dividas.maiorJuros?.nome || "a dívida de maior juro"}** para estancar juros compostos.
+2. **Revisão de assinaturas:** Você gasta ${fmt(snapshot.assinaturasRecorrentes.custoMensal)}/mês (${fmt(snapshot.assinaturasRecorrentes.custoAnual)}/ano) em assinaturas recorrentes.`;
   }
 
-  if (query.includes("resumo") || query.includes("resumo deste mês") || query.includes("balanço")) {
-    const topList = topCategories.slice(0, 3).map(([c, v]) => `- **${c}:** R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`).join("\n");
-    return `### 📑 Resumo Financeiro do Mês\n\n- **Receitas Totais:** R$ ${currentMonthIncomes.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Despesas Totais:** R$ ${currentMonthExpenses.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Saldo Restante:** R$ ${(currentMonthIncomes - currentMonthExpenses).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Saldo em Contas:** R$ ${totalBalance.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n\n**Principais Categorias de Gastos:**\n${topList || "Nenhuma despesa expressiva registrada."}\n\n- **Metas ativas:** ${goals.length} metas configuradas.`;
+  if (query.includes("emprest") || query.includes("receber") || query.includes("devedor")) {
+    return `### 🤝 Panorama de Dinheiro Emprestado
+
+- **Total a receber:** ${fmt(snapshot.dinheiroEmprestadoAReceber.totalPendente)} (${snapshot.dinheiroEmprestadoAReceber.quantidadeAbertos} em aberto)
+- **Em atraso:** ${snapshot.dinheiroEmprestadoAReceber.quantidadeAtrasados} registro(s)
+${snapshot.dinheiroEmprestadoAReceber.atrasadosDetalhes.map((r: any) => `- **${r.pessoa}:** ${fmt(r.valorRestante)} (venceu em ${r.vencimento})`).join("\n")}`;
   }
 
-  return `### 💡 Análise do Copiloto Financeiro\n\nAnalisei seus dados em tempo real:\n- **Saldo Geral:** R$ ${totalBalance.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Receitas (Mês):** R$ ${currentMonthIncomes.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Despesas (Mês):** R$ ${currentMonthExpenses.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n- **Dívidas Ativas:** R$ ${totalDebts.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}\n\nVocê pode clicar nos botões rápidos abaixo ou me perguntar sobre seus gastos, limites e dívidas!`;
+  const topList = snapshot.topCategoriasMesAtual
+    .slice(0, 3)
+    .map(c => `- **${c.category}:** ${fmt(c.spent)}`)
+    .join("\n");
+
+  return `### 📑 Panorama Financeiro em Tempo Real
+
+- **Saldo em Contas:** ${fmt(snapshot.contas.saldoTotal)}
+- **Receitas (Mês):** ${fmt(snapshot.mesAtual.receitas)} | **Despesas:** ${fmt(snapshot.mesAtual.despesas)}
+- **Taxa de Poupança:** ${snapshot.mesAtual.taxaPoupancaPct}% | **Limite Seguro Hoje:** ${fmt(snapshot.mesAtual.limiteSeguroDiario)}/dia
+- **Dívidas Ativas:** ${fmt(snapshot.dividas.totalRestante)} | **A Receber:** ${fmt(snapshot.dinheiroEmprestadoAReceber.totalPendente)}
+- **Uso de Cartões:** ${snapshot.cartoesCredito.comprometimentoPct}% (${fmt(snapshot.cartoesCredito.limiteUsado)} de ${fmt(snapshot.cartoesCredito.limiteTotal)})
+
+**Top gastos do mês:**
+${topList || "- Sem gastos expressivos no mês."}
+
+Você pode me pedir para **registrar gastos**, **criar metas**, **simular compras** ou analisar qualquer área das suas finanças!`;
 }
 
 export async function analyzeDebtUrgency(
@@ -440,33 +688,28 @@ export async function analyzeDebtUrgency(
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Especialista em Recuperação de Crédito e Planejamento Financeiro de elite. 
-        Sua tarefa é analisar uma dívida específica e determinar o grau de URGÊNCIA, a PRIORIDADE de pagamento e o RISCO.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Especialista em Recuperação de Crédito e Matemática Financeira. 
+        Sua tarefa é analisar uma dívida específica e determinar URGÊNCIA, PRIORIDADE de pagamento e RISCO com rigor técnico.
         
         Critérios de Análise:
-        1. Juros: Taxas acima de 5% a.m. são críticas (Cartão de Crédito, Cheque Especial).
-        2. Atraso: Dívidas já vencidas têm urgência máxima.
-        3. Impacto no Orçamento: Qual a porcentagem da renda que a parcela consome? (>30% é perigoso).
-        4. Tipo de Dívida: Financiamentos (casa/carro) têm garantia, cartões não mas juros são maiores.
-        5. Relação Dívida/Renda: O total da dívida em relação à renda anual.
-        6. Crescimento: Se os juros acumulados estão crescendo rápido demais em relação ao principal.
-        
-        Classificações de Urgência: critica, alta, moderada, baixa.
-        Classificações de Prioridade: alta, media, baixa.
-        Grau de Urgência: 0 a 100 (onde 100 é urgência máxima).
-        Nível de Risco: baixo, medio, alto, critico.
+        1. Juros: Taxas acima de 5% a.m. são críticas (Cartão de Crédito, Cheque Especial). Acima de 2% a.m. são altas.
+        2. Atraso: Dívidas com parcelas vencidas têm urgência crítica/máxima.
+        3. Impacto no Orçamento: Porcentagem da renda comprometida pela parcela (>30% é crítico).
+        4. Tipo e Garantia: Financiamentos com garantia real (imóvel/veículo) trazem risco patrimonial.
+        5. Crescimento Composto: Velocidade de bola de neve se não amortizada.
         
         Retorne APENAS um JSON no formato:
         {
           "urgency": "critica" | "alta" | "moderada" | "baixa",
           "urgencyScore": number,
-          "urgencyReason": "Explicação técnica e direta do porquê desta urgência",
+          "urgencyReason": "Explicação técnica direta citando juros, prazo e comprometimento da renda",
           "priority": "alta" | "media" | "baixa",
-          "priorityReason": "Explicação estratégica de por que pagar esta dívida agora ou depois",
+          "priorityReason": "Explicação estratégica de por que pagar agora ou depois",
           "riskLevel": "baixo" | "medio" | "alto" | "critico",
-          "riskReason": "Explicação do risco de inadimplência ou crescimento da dívida"
+          "riskReason": "Explicação objetiva do risco de inadimplência ou perda patrimonial"
         }`,
         responseMimeType: "application/json"
       },
@@ -478,6 +721,7 @@ export async function analyzeDebtUrgency(
               Perfil do Usuário: ${JSON.stringify(userProfile)}
               Renda Mensal Disponível: ${monthlyIncome}
               Gastos Fixos Mensais: ${monthlyExpenses}
+              Folga Mensal Estimada: ${monthlyIncome - monthlyExpenses}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -486,7 +730,6 @@ export async function analyzeDebtUrgency(
     });
 
     const result = safeJsonParse(response.text || "", fallback, "Debt Urgency");
-    // Ensure values are valid
     if (!["critica", "alta", "moderada", "baixa"].includes(result.urgency)) result.urgency = "moderada";
     if (!["alta", "media", "baixa"].includes(result.priority)) result.priority = "media";
     if (!["baixo", "medio", "alto", "critico"].includes(result.riskLevel)) result.riskLevel = "medio";
@@ -508,10 +751,10 @@ export async function generateDebtPaymentStrategy(
     strategyName: "Híbrida",
     explanation: "Foque em pagar as dívidas com juros maiores que 5% ao mês primeiro.",
     comparison: {
-      avalanche: { savings: 0, timeMonths: 12, pros: ["Economia de juros"], cons: ["Demora para quitar a primeira"] },
-      snowball: { savings: 0, timeMonths: 14, pros: ["Motivação rápida"], cons: ["Paga mais juros"] }
+      avalanche: { savings: 0, timeMonths: 12, pros: ["Economia máxima de juros"], cons: ["Demora psicológica para quitar a primeira"] },
+      snowball: { savings: 0, timeMonths: 14, pros: ["Vitórias rápidas motivadoras"], cons: ["Custo maior de juros totais"] }
     },
-    steps: ["Liste todas as dívidas", "Negocie juros", "Pague o mínimo de todas e o máximo na prioritária"],
+    steps: ["Liste todas as dívidas com juros", "Negocie taxas acima de 3% a.m.", "Pague o mínimo das demais e concentre a folga na prioritária"],
     estimatedTimeMonths: 12,
     potentialSavings: 0,
     priorityList: []
@@ -519,28 +762,24 @@ export async function generateDebtPaymentStrategy(
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Estrategista Financeiro especializado em quitação de dívidas. 
-        Sua tarefa é analisar a lista de dívidas do usuário e propor uma estratégia otimizada de pagamento, comparando os métodos Avalanche e Bola de Neve.
-        
-        Considere:
-        1. Método Avalanche: Focar na dívida com maior taxa de juros primeiro (matematicamente mais eficiente).
-        2. Método Bola de Neve: Focar na dívida de menor valor para ganhar motivação psicológica (comportamentalmente mais eficiente).
-        3. Capacidade de Pagamento: Quanto sobra da renda após gastos fixos.
-        4. Economia de Juros: Calcule a economia estimada ao antecipar pagamentos.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        systemInstruction: `Você é um Estrategista Matemático e Comportamental de Quitação de Dívidas.
+        Compare matematicamente os métodos Avalanche (maior juros primeiro) e Bola de Neve (menor saldo primeiro) usando a folga mensal real.
+        Calcule estimativas realistas de economia de juros (savings) e prazo em meses (timeMonths).
         
         Retorne APENAS um JSON no formato:
         {
           "strategyName": "Avalanche" | "Bola de Neve" | "Híbrida",
-          "explanation": "Por que esta estratégia é a melhor para este usuário?",
+          "explanation": "Por que esta estratégia vence matematicamente ou comportamentalmente para este perfil?",
           "comparison": {
             "avalanche": { "savings": number, "timeMonths": number, "pros": string[], "cons": string[] },
             "snowball": { "savings": number, "timeMonths": number, "pros": string[], "cons": string[] }
           },
           "steps": string[],
           "estimatedTimeMonths": number,
-          "potentialSavings": number (estimativa de quanto economizará em juros),
+          "potentialSavings": number,
           "priorityList": { "debtId": string, "reason": string, "method": "avalanche" | "snowball" }[]
         }`,
         responseMimeType: "application/json"
@@ -553,6 +792,7 @@ export async function generateDebtPaymentStrategy(
               Perfil do Usuário: ${JSON.stringify(userProfile)}
               Renda Mensal: ${monthlyIncome}
               Gastos Fixos: ${monthlyExpenses}
+              Capacidade Mensal de Amortização Estimada: ${Math.max(0, monthlyIncome - monthlyExpenses)}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -579,26 +819,22 @@ export async function analyzeFinancialProtection(
     riskTolerance: string;
   }
 ) {
+  const monthsCovered = data.essentialExpenses > 0 ? Number((data.currentReserve / data.essentialExpenses).toFixed(1)) : 0;
   const fallback = {
-    securityLevel: "risco",
-    score: 50,
-    alerts: ["Não foi possível realizar a análise completa."],
-    recommendations: ["Mantenha sua reserva em liquidez diária."],
-    crisisAnalysis: "Sua reserva atual cobre aproximadamente 3 meses de gastos essenciais."
+    securityLevel: monthsCovered >= 6 ? "seguro" : monthsCovered >= 3 ? "estavel" : "risco",
+    score: Math.min(100, Math.round(monthsCovered * 12)),
+    alerts: monthsCovered < 3 ? ["Sua reserva cobre menos de 3 meses de gastos essenciais."] : [],
+    recommendations: ["Mantenha sua reserva em liquidez diária (Tesouro Selic ou CDB 100% CDI)."],
+    crisisAnalysis: `Sua reserva atual cobre aproximadamente ${monthsCovered} meses de gastos essenciais.`
   };
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Especialista em Gestão de Riscos e Segurança Financeira. 
-        Sua tarefa é analisar a Proteção Financeira do usuário e gerar alertas e recomendações.
-        
-        Critérios:
-        1. Reserva vs Custo de Vida: Ter menos de 3 meses é risco.
-        2. Dívidas: Dívidas altas reduzem a segurança.
-        3. Dependência: Mais dependentes exigem reserva maior.
-        4. Tipo de Renda: Renda variável exige reserva de 12 meses.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Especialista em Gestão de Riscos, Liquidez e Blindagem Financeira.
+        Analise a Reserva de Emergência e a Proteção Financeira do usuário considerando tipo de renda, dependentes e dívidas.
         
         Retorne APENAS um JSON no formato:
         {
@@ -606,7 +842,7 @@ export async function analyzeFinancialProtection(
           "score": number (0-100),
           "alerts": string[],
           "recommendations": string[],
-          "crisisAnalysis": "Análise de quanto tempo o usuário sobreviveria em crise total"
+          "crisisAnalysis": "Análise exata de quantos meses o usuário sobreviveria em queda total de renda e qual a meta ideal em R$"
         }`,
         responseMimeType: "application/json"
       },
@@ -615,6 +851,7 @@ export async function analyzeFinancialProtection(
           parts: [
             {
               text: `Dados de Proteção: ${JSON.stringify(data)}
+              Meses de Gastos Essenciais Cobertos: ${monthsCovered}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -642,26 +879,21 @@ export async function analyzeReceivableRisk(receivable: Receivable, debtor?: Deb
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Especialista em Gestão de Crédito e Cobrança de elite. 
-        Sua tarefa é analisar o risco de inadimplência de um empréstimo ou conta a receber e prever o comportamento de pagamento.
-        
-        Critérios de Análise:
-        1. Tempo decorrido vs tempo para vencimento.
-        2. Valor em relação a um perfil médio de empréstimo pessoal.
-        3. Histórico do devedor (se disponível): atrasos anteriores, total já pago.
-        4. Comportamento de pagamento: frequência e pontualidade.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Especialista em Análise de Crédito Pessoal e Recuperação de Recebíveis.
+        Avalie o risco real de inadimplência do empréstimo considerando valor, prazo, confiabilidade prévia, taxa de atraso do devedor e proporção já quitada.
         
         Retorne APENAS um JSON no formato:
         {
           "risk": "baixo" | "medio" | "alto" | "critico",
-          "reason": "Explicação técnica e direta (ex: 'Alto risco: histórico de atrasos + valor alto')",
+          "reason": "Explicação técnica e direta",
           "priority": "cobrar_agora" | "cobrar_em_breve" | "pode_aguardar",
           "probabilityOfReceiving": number (0-100),
-          "estimatedReceiptDate": "YYYY-MM-DD" (data estimada real de recebimento),
-          "probableDelayDays": number (dias de atraso provável em relação ao vencimento),
-          "aiAnalysis": "Análise detalhada do comportamento de pagamento e impacto financeiro"
+          "estimatedReceiptDate": "YYYY-MM-DD",
+          "probableDelayDays": number,
+          "aiAnalysis": "Análise detalhada do comportamento de pagamento e recomendação de acompanhamento"
         }`,
         responseMimeType: "application/json"
       },
@@ -670,7 +902,7 @@ export async function analyzeReceivableRisk(receivable: Receivable, debtor?: Deb
           parts: [
             {
               text: `Dados do Recebível: ${JSON.stringify(receivable)}
-              Dados do Devedor: ${JSON.stringify(debtor || "Não disponível")}
+              Dados do Devedor: ${JSON.stringify(debtor || "Primeiro registro sem histórico")}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -695,23 +927,18 @@ export async function analyzeDebtorReliability(debtor: Partial<Debtor>, history:
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Analista de Crédito Bancário. 
-        Sua tarefa é avaliar a confiabilidade de um devedor e recomendar um limite de crédito seguro.
-        
-        Critérios:
-        1. Taxa de atraso (delayRate).
-        2. Total emprestado vs Total recebido.
-        3. Frequência de empréstimos e pagamentos.
-        4. Tempo médio de pagamento.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Analista de Crédito Bancário.
+        Avalie a confiabilidade deste devedor com base no histórico completo e recomende um limite seguro de exposição em R$.
         
         Retorne APENAS um JSON no formato:
         {
           "reliability": "alta" | "media" | "baixa" | "critica",
-          "recommendedLimit": number (valor sugerido para novos empréstimos),
+          "recommendedLimit": number,
           "delayRate": number (0-100),
-          "analysis": "Explicação do perfil de pagador"
+          "analysis": "Explicação objetiva do histórico de pagamento"
         }`,
         responseMimeType: "application/json"
       },
@@ -740,21 +967,22 @@ export async function generateCollectionMessage(
   tone: "friendly" | "neutral" | "firm",
   debtor?: Debtor
 ) {
-  const defaultMsg = `Olá ${debtor?.name || receivable.personName}, passando para lembrar do valor de R$ ${receivable.remainingValue} referente ao ${receivable.type}.`;
+  const defaultMsg = `Olá ${debtor?.name || receivable.personName}, passando para lembrar do valor de R$ ${receivable.remainingValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} referente ao ${receivable.type}.`;
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Assistente de Cobrança Inteligente. 
-        Gere uma mensagem de cobrança para WhatsApp baseada no tom solicitado e no risco do devedor.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: `Você é um Especialista em Comunicação Financeira e Cobrança Empática e Eficaz.
+        Gere uma mensagem pronta para WhatsApp (natural, educada e persuasiva, preservando o relacionamento quando friendly/neutral e sendo clara sobre prazo/acordo quando firm).
         
         Tons:
-        - friendly: Amigável, leve, lembrete casual.
-        - neutral: Profissional, direto, sem rodeios.
-        - firm: Firme, sério, enfatizando o atraso e a necessidade de pagamento.
+        - friendly: Amigável, leve, lembrete natural sem constrangimento.
+        - neutral: Profissional, objetiva, solicitando previsão de pagamento ou Pix.
+        - firm: Firme e respeitosa, destacando o atraso e propondo data limite ou parcelamento imediato.
         
-        Retorne APENAS o texto da mensagem formatado para WhatsApp (use emojis se apropriado).`,
+        Retorne APENAS o texto pronto da mensagem para copiar/enviar no WhatsApp.`,
       },
       contents: [
         {
@@ -763,7 +991,7 @@ export async function generateCollectionMessage(
               text: `Recebível: ${JSON.stringify(receivable)}
               Devedor: ${JSON.stringify(debtor || { name: receivable.personName })}
               Tom solicitado: ${tone}
-              Data Atual: ${new Date().toISOString()}`
+              Data Atual: ${new Date().toISOString().split("T")[0]}`
             }
           ]
         }
@@ -787,17 +1015,19 @@ export async function analyzeIncomeStability(transactions: Transaction[]) {
   };
 
   try {
+    const incomes = transactions.filter(t => t.type === "income").slice(0, 60);
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Analista de Renda e Estabilidade Financeira. 
-        Analise o padrão de ganhos do usuário, a variação da renda e a tendência de crescimento ou queda.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Analista de Renda, Previsibilidade de Receitas e Fluxo de Entrada.
+        Avalie regularidade mensal, concentração em única fonte, variação entre meses e tendência de crescimento ou queda.
         
         Retorne APENAS um JSON no formato:
         {
           "stability": "estavel" | "instavel" | "crescente" | "em_queda",
           "score": number (0-100),
-          "analysis": "Análise detalhada do padrão de ganhos",
+          "analysis": "Análise detalhada citando médias, concentração de fontes e sazonalidade",
           "trend": "Sua renda está crescendo" | "Sua renda é instável" | "Sua renda está em queda" | "Sua renda está estável",
           "recommendations": string[]
         }`,
@@ -807,7 +1037,7 @@ export async function analyzeIncomeStability(transactions: Transaction[]) {
         {
           parts: [
             {
-              text: `Transações de Receita: ${JSON.stringify(transactions.filter(t => t.type === "income").slice(0, 50))}
+              text: `Transações de Receita: ${JSON.stringify(incomes)}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -834,18 +1064,20 @@ export async function analyzeExpenseBehavior(transactions: Transaction[]) {
   };
 
   try {
+    const expenses = transactions.filter(t => t.type === "expense").slice(0, 60);
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Especialista em Comportamento de Consumo e Psicologia Financeira. 
-        Analise os padrões de consumo, gastos por emoção, desperdícios e comportamento impulsivo.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Especialista em Psicologia Econômica e Auditoria de Gastos Pessoais.
+        Identifique padrões de consumo por emoção, pequenos gastos recorrentes ("efeito cafezinho"), picos de final de semana e desperdícios quantificáveis em R$.
         
         Retorne APENAS um JSON no formato:
         {
           "behavior": "controlado" | "impulsivo" | "emocional" | "excessivo",
           "score": number (0-100),
           "impulsiveRate": number (0-100),
-          "emotionalAnalysis": "Análise de como as emoções afetam os gastos",
+          "emotionalAnalysis": "Análise profunda ligando emoções, categorias e valor gasto em R$",
           "wasteAlerts": string[],
           "trend": "Você está gastando acima do normal" | "Seu comportamento de gasto está saudável" | "Atenção a gastos impulsivos",
           "recommendations": string[]
@@ -856,7 +1088,7 @@ export async function analyzeExpenseBehavior(transactions: Transaction[]) {
         {
           parts: [
             {
-              text: `Transações de Despesa: ${JSON.stringify(transactions.filter(t => t.type === "expense").slice(0, 50))}
+              text: `Transações de Despesa: ${JSON.stringify(expenses)}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -883,22 +1115,19 @@ export async function analyzeStatement(transactions: Transaction[]) {
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Analista Financeiro de Alta Performance. 
-        Sua tarefa é analisar o EXTRATO UNIFICADO do usuário e fornecer insights estratégicos.
-        
-        Analise:
-        1. Equilíbrio entre Entradas e Saídas.
-        2. Gastos atípicos ou picos de despesa.
-        3. Categorias que estão consumindo mais recursos que o normal.
-        4. Oportunidades de economia imediata.
-        5. Alertas de duplicidade ou inconsistência (se houver).
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Auditor Financeiro de Alta Performance.
+        Analise o EXTRATO UNIFICADO para detectar:
+        1. Equilíbrio real entre entradas e saídas.
+        2. Transações atípicas, picos fora da curva ou possíveis cobranças duplicadas.
+        3. Categorias dominantes e oportunidades imediatas de corte.
         
         Retorne APENAS um JSON no formato:
         {
           "healthScore": number (0-100),
-          "summary": "Resumo executivo da situação financeira do período",
+          "summary": "Resumo executivo com valores totais e conclusão objetiva",
           "insights": string[],
           "warnings": string[],
           "unusualTransactions": string[] (IDs de transações atípicas),
@@ -910,7 +1139,7 @@ export async function analyzeStatement(transactions: Transaction[]) {
         {
           parts: [
             {
-              text: `Extrato de Transações: ${JSON.stringify(transactions.slice(0, 50))}
+              text: `Extrato de Transações: ${JSON.stringify(transactions.slice(0, 60))}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -953,10 +1182,11 @@ export async function generateCollectionStrategy(
   let responseText = "";
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Especialista em Recuperação de Crédito e Cobrança Inteligente. 
-        Analise a carteira de recebíveis (dinheiro emprestado) do usuário e gere uma estratégia de cobrança eficaz.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        systemInstruction: `Você é um Especialista em Recuperação de Crédito e Cobrança Estratégica.
+        Analise toda a carteira de recebíveis e gere um plano individualizado por devedor, priorizando maior risco/valor e fornecendo mensagens prontas de WhatsApp persuasivas.
         
         Retorne APENAS um JSON no formato:
         {
@@ -967,9 +1197,9 @@ export async function generateCollectionStrategy(
             {
               "debtorName": "string",
               "priority": "cobrar_agora" | "cobrar_em_breve" | "pode_aguardar",
-              "action": "string (ex: Enviar mensagem firme, Ligar, Aguardar)",
-              "suggestedMessage": "string (uma sugestão de mensagem curta e eficaz)",
-              "reason": "string (por que essa abordagem?)"
+              "action": "string",
+              "suggestedMessage": "string",
+              "reason": "string"
             }
           ],
           "recommendations": string[]
@@ -997,7 +1227,8 @@ export async function generateCollectionStrategy(
                 nome: d.name,
                 confiabilidade: d.reliability,
                 taxaAtraso: d.delayRate,
-                totalEmprestado: d.totalLent
+                totalEmprestado: d.totalLent,
+                totalRecebido: d.totalReceived
               })))}
               Data Atual: ${new Date().toISOString()}`
             }
@@ -1006,7 +1237,6 @@ export async function generateCollectionStrategy(
       ]
     });
 
-    
     responseText = response.text || "";
   } catch (error) {
     handleAIError(error, "Collection Strategy");
@@ -1027,17 +1257,11 @@ export async function analyzeTransfers(transactions: Transaction[]) {
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Analista de Fluxo de Caixa e Movimentações Internas. 
-        Sua tarefa é analisar as TRANSFERÊNCIAS entre contas do usuário e identificar padrões, 
-        eficiência de alocação e possíveis otimizações.
-        
-        Analise:
-        1. Frequência de transferências entre contas específicas.
-        2. Volume de movimentação interna.
-        3. Se as transferências parecem ser para cobrir saldos negativos ou para investimentos/reservas.
-        4. Sugestões para automatizar ou reduzir a necessidade de movimentações manuais.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Analista de Tesouraria Pessoal e Alocação entre Contas.
+        Analise as transferências internas identificando cobertura de saldo negativo, aportes para reserva/investimentos e oportunidades de automação.
         
         Retorne APENAS um JSON no formato:
         {
@@ -1071,17 +1295,18 @@ export async function analyzeTransfers(transactions: Transaction[]) {
 export async function suggestSubCategories(categoryName: string): Promise<string[]> {
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
-      contents: `Sugira 5 subcategorias lógicas para a categoria de finanças: "${categoryName}".
+      model: AI_MODEL,
+      contents: `Sugira 5 subcategorias práticas e comuns no Brasil para a categoria de finanças pessoais: "${categoryName}".
       Retorne APENAS um array JSON de strings. Exemplo: ["Sub1", "Sub2", "Sub3", "Sub4", "Sub5"]`,
       config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: "application/json",
       },
     });
 
     const text = response.text;
     if (!text) return [];
-    return JSON.parse(text);
+    return safeJsonParse<string[]>(text, [], "Suggest Subcategories");
   } catch (error) {
     handleAIError(error, "Suggest Subcategories");
     return [];
@@ -1102,7 +1327,7 @@ export async function suggestCategoryAndTags(
   history: Transaction[]
 ) {
   const fallback = {
-    category: transaction.type === "income" ? "Outros" : "Outros",
+    category: "Outros",
     subCategory: "Geral",
     tags: [],
     reasoning: "Não foi possível gerar sugestões automáticas."
@@ -1110,26 +1335,23 @@ export async function suggestCategoryAndTags(
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Assistente de Organização Financeira Inteligente. 
-        Sua tarefa é sugerir a melhor CATEGORIA, SUBCATEGORIA e TAGS para uma transação.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: `Você é um Classificador Financeiro Inteligente de alta precisão.
+        Analise descrição, estabelecimento, valor e histórico para sugerir a CATEGORIA exata (priorizando as categorias existentes), SUBCATEGORIA e Smart Tags.
         
-        Regras:
-        1. Use as categorias existentes se elas forem adequadas.
-        2. Sugira subcategorias lógicas (ex: Categoria 'Alimentação' -> Subcategoria 'Restaurante' ou 'Mercado').
-        3. Sugira tags úteis para análise (ex: #lazer, #trabalho, #essencial).
-        4. Crie "Smart Tags" obrigatórias baseadas em:
-           - Valor: #GastoAlto (se > R$ 500), #PequenoValor (se < R$ 50).
-           - Comportamento: #Impulsivo (se for lazer/compras não planejado), #Essencial (se for moradia/saúde/transporte).
-           - Frequência: #Recorrente (se houver transações similares no histórico), #Eventual (se for algo raro).
+        Regras de Smart Tags:
+        - Valor: #GastoAlto (> R$ 500), #PequenoValor (< R$ 50)
+        - Comportamento: #Essencial ou #EstiloDeVida ou #Impulsivo
+        - Frequência: #Recorrente (se aparecer no histórico) ou #Eventual
         
         Retorne APENAS um JSON no formato:
         {
           "category": "Nome da Categoria",
           "subCategory": "Nome da Subcategoria",
           "tags": string[],
-          "reasoning": "Breve explicação da sugestão"
+          "reasoning": "Breve explicação da classificação"
         }`,
         responseMimeType: "application/json"
       },
@@ -1160,15 +1382,11 @@ export async function suggestReminders(transactions: Transaction[], currentRemin
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Assistente de Organização Pessoal e Financeira. 
-        Sua tarefa é analisar o histórico de transações do usuário e identificar padrões de gastos recorrentes que ainda não possuem lembretes configurados.
-        
-        Critérios:
-        1. Identifique transações com descrições similares que ocorrem mensalmente (ex: Internet, Aluguel, Academia).
-        2. Sugira a criação de um lembrete para essas contas.
-        3. Verifique se o lembrete já existe na lista de lembretes atuais para evitar duplicidade.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Assistente de Prevenção de Atrasos Financeiros.
+        Analise transações recorrentes (aluguel, internet, energia, academia, assinaturas, parcelas) que ainda não possuem lembrete cadastrado e sugira lembretes com a próxima data provável.
         
         Retorne APENAS um JSON no formato:
         {
@@ -1177,11 +1395,11 @@ export async function suggestReminders(transactions: Transaction[], currentRemin
               "title": "string",
               "description": "string",
               "type": "financeiro" | "conta",
-              "date": "YYYY-MM-DD" (próxima data provável),
+              "date": "YYYY-MM-DD",
               "recurrent": true,
               "frequency": "mensal",
               "priority": "media" | "alta",
-              "reason": "Por que você está sugerindo isso? (ex: 'Você paga a Internet todo dia 10')"
+              "reason": "string"
             }
           ]
         }`,
@@ -1221,16 +1439,17 @@ export async function analyzeBudgetBehavior(
   };
 
   try {
+    const snapshot = buildFinancialSnapshot({ budgets, transactions, accounts: [] }, userProfile);
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Especialista em Orçamento e Comportamento Financeiro. 
-        Analise os orçamentos planejados versus os gastos reais do usuário.
-        Identifique categorias com maior estouro, padrões mensais e dê recomendações para manter o orçamento sob controle.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        systemInstruction: `Você é um Especialista em Orçamento Base Zero e Controle de Limites.
+        Compare orçamentos planejados vs. gastos reais, identifique categorias críticas e sugira remanejamentos práticos entre categorias.
         
         Retorne APENAS um JSON no formato:
         {
-          "analysis": "Análise detalhada do cumprimento do orçamento",
+          "analysis": "Análise detalhada citando categorias, percentuais e valores em R$",
           "alerts": string[],
           "recommendations": string[],
           "topOverspentCategories": string[],
@@ -1243,7 +1462,8 @@ export async function analyzeBudgetBehavior(
           parts: [
             {
               text: `Orçamentos Atuais: ${JSON.stringify(budgets)}
-              Transações do Mês: ${JSON.stringify(transactions.slice(0, 50))}
+              Alertas Pré-Calculados: ${JSON.stringify(snapshot.orcamentosEmAlerta)}
+              Top Categorias Mês Atual: ${JSON.stringify(snapshot.topCategoriasMesAtual)}
               Perfil do Usuário: ${JSON.stringify(userProfile)}
               Data Atual: ${new Date().toISOString()}`
             }
@@ -1269,25 +1489,21 @@ export async function analyzeGoalsStrategy(goals: any[], transactions: any[], ac
   };
 
   try {
+    const snapshot = buildFinancialSnapshot({ goals, transactions, accounts });
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Estrategista Financeiro e Planejador de Metas de elite. 
-        Sua tarefa é analisar a carteira de objetivos do usuário e propor uma estratégia otimizada de aportes e priorização.
-        
-        Analise:
-        1. Prioridade das metas (alta, media, baixa).
-        2. Saúde das metas (atrasada, no ritmo, adiantada).
-        3. Disponibilidade financeira (contas e fluxo de caixa).
-        4. Impacto de dívidas ou gastos excessivos nas metas.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        systemInstruction: `Você é um Estrategista Financeiro e Planejador de Metas de Elite.
+        Calcule o aporte mensal necessário para cada meta considerando o prazo e a sobra real do usuário. Sugira priorização realista.
         
         Retorne APENAS um JSON no formato:
         {
-          "prioritySuggestion": "Qual meta deve ser o foco principal agora e por quê?",
-          "adjustments": "Sugestões de pausa, aceleração ou replanejamento de prazos",
-          "healthCheck": "Análise geral do ritmo de conquista das metas",
-          "futureVision": "Previsão de quando as principais metas serão atingidas se mantiver o ritmo atual",
-          "tips": string[] (3 dicas práticas para otimizar os aportes)
+          "prioritySuggestion": "Qual meta priorizar agora, quanto aportar por mês (R$) e por quê?",
+          "adjustments": "Sugestões concretas de aceleração ou ajuste de prazo",
+          "healthCheck": "Avaliação realista do ritmo atual frente aos prazos",
+          "futureVision": "Projeção de conquista mantendo a capacidade atual de poupança",
+          "tips": string[] (3 dicas práticas)
         }`,
         responseMimeType: "application/json"
       },
@@ -1295,9 +1511,9 @@ export async function analyzeGoalsStrategy(goals: any[], transactions: any[], ac
         {
           parts: [
             {
-              text: `Metas Atuais: ${JSON.stringify(goals)}
-              Transações Recentes: ${JSON.stringify(transactions.slice(0, 30))}
-              Contas: ${JSON.stringify(accounts)}
+              text: `Metas Atuais: ${JSON.stringify(snapshot.metas)}
+              Fluxo Mensal Atual: ${JSON.stringify(snapshot.mesAtual)}
+              Saldo em Contas: ${JSON.stringify(snapshot.contas)}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -1312,9 +1528,6 @@ export async function analyzeGoalsStrategy(goals: any[], transactions: any[], ac
   }
 }
 
-/**
- * Analisa o fluxo de caixa futuro e fornece insights estratégicos.
- */
 export async function analyzeFutureCashFlow(
   projection: any[],
   accounts: any[],
@@ -1322,13 +1535,13 @@ export async function analyzeFutureCashFlow(
   receivables: any[]
 ) {
   const prompt = `
-    Analise o fluxo de caixa futuro (projeção de saldo) de um usuário e forneça insights estratégicos.
+    Analise com precisão matemática o fluxo de caixa futuro (projeção de 30-90 dias) do usuário e forneça insights estratégicos.
     
-    Dados de Projeção (últimos 30-90 dias):
+    Dados de Projeção:
     ${JSON.stringify(projection.map(p => ({ date: p.date, balance: p.balance, income: p.income, expense: p.expense })))}
     
     Contas Atuais:
-    ${JSON.stringify(accounts.map(a => ({ name: a.name, balance: a.balance })))}
+    ${JSON.stringify(accounts.map(a => ({ name: a.name, balance: a.balance, principal: !!a.isDefault })))}
     
     Dívidas:
     ${JSON.stringify(debts.map(d => ({ 
@@ -1341,18 +1554,18 @@ export async function analyzeFutureCashFlow(
     })))}
     
     Recebíveis:
-    ${JSON.stringify(receivables.map(r => ({ name: r.personName, value: r.remainingValue, due: r.dueDate })))}
+    ${JSON.stringify(receivables.map(r => ({ name: r.personName, value: r.remainingValue, due: r.dueDate, status: r.status })))}
     
     Responda em JSON com o seguinte formato:
     {
-      "diagnosis": "Resumo da saúde financeira futura",
-      "risks": ["Lista de riscos detectados (ex: saldo negativo em X dias)"],
-      "opportunities": ["Oportunidades (ex: antecipar pagamento, investir excesso)"],
+      "diagnosis": "Resumo preciso da saúde futura citando menor saldo projetado e data crítica",
+      "risks": ["Lista de riscos detectados com datas e valores"],
+      "opportunities": ["Oportunidades concretas (ex: amortizar juros, aplicar sobra)"],
       "suggestions": [
-        { "title": "Título da sugestão", "description": "Explicação detalhada", "impact": "Alto/Médio/Baixo" }
+        { "title": "Título da sugestão", "description": "Explicação detalhada com valores", "impact": "Alto/Médio/Baixo" }
       ],
-      "futureVision": "Como as finanças estarão se nada for feito",
-      "actionPlan": ["Passos práticos para melhorar o fluxo"]
+      "futureVision": "Projeção realista se mantiver o ritmo atual",
+      "actionPlan": ["Passos práticos para os próximos 30 dias"]
     }
   `;
 
@@ -1370,9 +1583,12 @@ export async function analyzeFutureCashFlow(
   let responseText = "";
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       contents: prompt,
-      config: { responseMimeType: "application/json" }
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        responseMimeType: "application/json"
+      }
     });
     responseText = response.text || "";
   } catch (error) {
@@ -1403,24 +1619,18 @@ export async function analyzeLifePlan(
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Estrategista de Vida e Planejador Financeiro de Elite. 
-        Sua tarefa é analisar o Plano de Vida do usuário, as projeções financeiras de longo prazo e fornecer uma visão estratégica.
-        
-        Analise:
-        1. Viabilidade do Plano: O usuário conseguirá atingir seus objetivos no horizonte definido?
-        2. Riscos de Longo Prazo: Inflação, falta de diversificação, excesso de gastos, dívidas.
-        3. Oportunidades: Aumentar aportes, mudar perfil de investimento, antecipar metas.
-        4. Visão de Futuro: Como estará a vida financeira do usuário daqui a 5, 10, 20 anos?
-        5. Plano de Ação: Passos concretos para o próximo ano.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        systemInstruction: `Você é um Estrategista de Vida, Independência Financeira e Alocação Patrimonial de Elite.
+        Avalie a viabilidade matemática do Plano de Vida frente a renda, gastos, dívidas, metas e perfil de risco.
         
         Retorne APENAS um JSON no formato:
         {
-          "diagnosis": "Análise profunda da situação atual vs objetivos",
+          "diagnosis": "Análise profunda da sustentabilidade do plano e taxa de poupança",
           "risks": string[],
           "opportunities": string[],
-          "futureVision": "Descrição inspiradora e realista do futuro projetado",
+          "futureVision": "Visão realista do patrimônio em 5, 10 e no fim do horizonte",
           "actionPlan": string[],
           "healthScore": number (0-100),
           "status": "green" | "yellow" | "red"
@@ -1433,7 +1643,7 @@ export async function analyzeLifePlan(
             {
               text: `Plano de Vida: ${JSON.stringify(lifePlan)}
               Projeções (Realista): ${JSON.stringify(projections.realista)}
-              Objetivos Vinculados: ${JSON.stringify(goals.filter(g => lifePlan.linkedGoalIds.includes(g.id)))}
+              Objetivos Vinculados: ${JSON.stringify(goals.filter(g => lifePlan.linkedGoalIds?.includes(g.id)))}
               Contas Atuais: ${JSON.stringify(accounts)}
               Dívidas: ${JSON.stringify(debts)}
               Recebíveis: ${JSON.stringify(receivables)}
@@ -1461,12 +1671,15 @@ export async function analyzeFinancialDependency(members: FamilyMember[], analys
   - Nível de Risco: ${analysis.riskLevel}
   - Sobrecarga do Usuário: ${analysis.userOverload ? "Sim" : "Não"}
 
-  Forneça uma análise estratégica curta e direta (máximo 3 frases) em português, identificando riscos de colapso financeiro ou sobrecarga excessiva.`;
+  Forneça uma análise estratégica curta e direta (máximo 3 frases) em português, identificando riscos de sobrecarga financeira e 1 ação prática de proteção/equilíbrio.`;
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM }
+      }
     });
     return response.text || "Não foi possível gerar a análise no momento.";
   } catch (error) {
@@ -1485,25 +1698,19 @@ export async function analyzeCalendar(events: FinancialEvent[]) {
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é um Especialista em Previsão Financeira e Gestão de Fluxo de Caixa. 
-        Sua tarefa é analisar o CALENDÁRIO FINANCEIRO do usuário, identificar padrões, prever o saldo futuro e alertar sobre riscos.
-        
-        Analise:
-        1. Padrões de gastos recorrentes.
-        2. Dias com alta concentração de pagamentos (conflitos).
-        3. Risco de saldo negativo em datas específicas.
-        4. Sugestões de ajustes (ex: adiar um pagamento, antecipar um recebimento).
-        
-        Você deve retornar um JSON válido de acordo com o esquema solicitado.`,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        systemInstruction: `Você é um Especialista em Previsão Financeira e Gestão de Liquidez Diária.
+        Analise os eventos futuros do calendário para detectar dias com concentração perigosa de contas, risco de saldo negativo e oportunidades de ajuste de datas.
+        Retorne um JSON válido de acordo com o esquema solicitado.`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             aiSuggestions: {
               type: Type.STRING,
-              description: "Resumo estratégico e sugestões de ações"
+              description: "Resumo estratégico e sugestões práticas de ajuste de vencimentos"
             },
             forecast: {
               type: Type.ARRAY,
@@ -1588,9 +1795,9 @@ export async function analyzeFamilyFinances(
   - Progresso das Metas: ${analysis.goalsProgress.toFixed(1)}%
   - Distribuição Atual: ${JSON.stringify(analysis.distribution)}
  
-  Forneça duas análises curtas e diretas em português (máximo 3 frases cada):
-  1. aiSuggestions: Sugestões de como melhorar a distribuição da renda e acelerar as metas.
-  2. balanceAnalysis: Análise de equilíbrio e justiça na contribuição de cada membro, identificando sobrecargas.
+  Forneça duas análises curtas, humanas e práticas em português (máximo 3 frases cada):
+  1. aiSuggestions: Sugestões concretas para acelerar as metas familiares e otimizar a divisão de despesas.
+  2. balanceAnalysis: Análise de proporcionalidade na contribuição de cada membro, apontando eventuais sobrecargas.
  
   Retorne um JSON no formato:
   {
@@ -1606,9 +1813,10 @@ export async function analyzeFamilyFinances(
   let responseText = "";
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       contents: prompt,
       config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
         responseMimeType: "application/json"
       }
     });
@@ -1642,39 +1850,35 @@ export async function generateActionPlan(
     actions: []
   };
 
+  const snapshot = buildFinancialSnapshot(data, userProfile);
+
   let responseText = "";
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       config: {
-        systemInstruction: `Você é o Copiloto Financeiro Inteligente definitivo. 
-        Sua missão é analisar toda a vida financeira do usuário e gerar um Plano de Ação personalizado, prático e executável.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.XHIGH },
+        systemInstruction: `Você é o Copiloto Financeiro Inteligente Definitivo.
+        Analise toda a vida financeira do usuário usando o snapshot pré-calculado e gere um Plano de Ação cirúrgico, ordenado por impacto financeiro em reais (R$).
         
-        Diretrizes Específicas para Dívidas:
-        1. Analise o 'riskLevel' e 'urgencyScore' das dívidas. Priorize ações para dívidas com risco 'alto' ou 'critico'.
-        2. Sugira antecipações de parcelas para dívidas com juros altos, mencionando a 'prepaymentSavings' (economia estimada).
-        3. Se o usuário tiver saldo em conta e dívidas críticas, sugira o pagamento imediato ou amortização.
-        4. Identifique se o usuário está seguindo a 'recommendedStrategy' (Avalanche ou Bola de Neve).
-        
-        Diretrizes Gerais:
-        1. Identifique problemas reais (gastos excessivos, dívidas altas, parcelas atrasadas, falta de reserva, metas atrasadas, dependência familiar excessiva, assinaturas inúteis).
-        2. Defina prioridades claras (urgente, importante, opcional).
-        3. Gere ações práticas com título, descrição, porquê, valor sugerido, prazo e impacto.
-        4. Crie uma sequência lógica de passos.
-        5. Identifique se a ação é "executável" pelo sistema (ex: criar uma transação de pagamento de dívida ou aporte em meta).
-        6. Seja empático, mas direto e focado em resultados.
+        Prioridades:
+        1. Dívidas críticas / juros altos (use saldo disponível ou cortes específicos para amortizar e cite economia).
+        2. Estouro de orçamento / desperdícios recorrentes / assinaturas ociosas.
+        3. Cartões acima de 30% do limite e recebíveis atrasados que exigem cobrança.
+        4. Formação de Reserva de Emergência e aportes em Metas atrasadas.
+        5. Marque como "executable": true apenas quando houver valor exato e tipo de transação claro.
         
         Retorne APENAS um JSON no formato:
         {
-          "summary": "Resumo executivo da situação atual e do plano proposto",
+          "summary": "Resumo executivo direto com diagnóstico em R$ e objetivo principal deste mês",
           "actions": [
             {
               "title": "string",
               "description": "string",
-              "why": "string (Por que essa ação foi sugerida?)",
+              "why": "string (citando dados reais encontrados)",
               "suggestedValue": number | null,
-              "deadline": "string (ex: 'Até o fim do mês', 'Imediato')",
-              "impact": "string (ex: 'Redução de 10% nos juros', 'Criação de reserva')",
+              "deadline": "string (ex: 'Imediato', 'Próximos 7 dias', 'Fim do mês')",
+              "impact": "string (ex: 'Economia de R$ 180/mês')",
               "priority": "urgente" | "importante" | "opcional",
               "type": "corte_gastos" | "pagamento_divida" | "reserva" | "investimento" | "meta" | "outro",
               "executable": boolean,
@@ -1693,18 +1897,12 @@ export async function generateActionPlan(
         {
           parts: [
             {
-              text: `Perfil do Usuário: ${JSON.stringify(userProfile)}
-              Contas: ${JSON.stringify(data.accounts)}
-              Transações Recentes: ${JSON.stringify(data.transactions.slice(0, 50))}
-              Metas: ${JSON.stringify(data.goals)}
-              Dívidas: ${JSON.stringify(data.debts)}
-              Parcelas de Dívidas: ${JSON.stringify(data.installments)}
+              text: `Snapshot Financeiro Consolidado: ${JSON.stringify(snapshot)}
+              Parcelas de Dívidas: ${JSON.stringify(data.installments.slice(0, 30))}
               Orçamentos: ${JSON.stringify(data.budgets)}
               Cartões: ${JSON.stringify(data.cards)}
               Recebíveis: ${JSON.stringify(data.receivables)}
-              Patrimônio: ${JSON.stringify(data.wealth)}
-              Família: ${JSON.stringify(data.family)}
-              Assinaturas: ${JSON.stringify(data.subscriptions)}
+              Transações Recentes: ${JSON.stringify(data.transactions.slice(0, 40))}
               Data Atual: ${new Date().toISOString()}`
             }
           ]
@@ -1739,32 +1937,34 @@ export async function generateTipOfTheDay(
     estimatedSavings: "Sob Medida"
   };
 
+  const snapshot = buildFinancialSnapshot({ transactions, budgets }, userProfile);
   const context = `
     Usuário: ${userProfile.displayName || "Usuário"}
     Renda Mensal Declarada: ${userProfile.onboardingData?.monthlyIncome || "Não especificada"}
-    Limite Geral de Orçamento: ${userProfile.onboardingData?.fixedExpenses || "Não especificado"}
-    Despesas Recentes (últimas 30 transações): ${JSON.stringify(
+    Resumo do Mês: ${JSON.stringify(snapshot.mesAtual)}
+    Top Categorias: ${JSON.stringify(snapshot.topCategoriasMesAtual)}
+    Gastos por Emoção: ${JSON.stringify(snapshot.gastosPorEmocao)}
+    Despesas Recentes: ${JSON.stringify(
       transactions
         .filter(t => t.type === "expense")
         .slice(0, 30)
-        .map(t => ({ desc: t.title || t.description, val: t.value, cat: t.category, date: t.date }))
+        .map(t => ({ desc: t.title || t.description, val: t.value, cat: t.category, emo: t.emotion, date: t.date }))
     )}
-    Orçamentos Configurados: ${JSON.stringify(
+    Orçamentos: ${JSON.stringify(
       budgets.map(b => ({ category: b.categoryName, planned: b.plannedValue, spent: b.spentValue }))
     )}
   `;
 
   const prompt = `
-    Você é um assistente financeiro inteligente especializado em economia de dinheiro de forma saudável e realista.
-    Com base no perfil do usuário e no histórico de consumo recente abaixo, crie uma única Dica do Dia de economia curta, extremamente personalizada, prática e acionável.
-    Evite clichês genéricos como "coma menos fora". Analise os dados de consumo fornecidos para encontrar um padrão específico ou dar uma sugestão específica para este usuário.
+    Com base nos gastos REAIS e emoções registradas pelo usuário, gere 1 única Dica do Dia cirúrgica, prática e personalizada.
+    Cite uma categoria, hábito ou padrão real observado nos dados e calcule uma economia realista.
 
-    Retorne APENAS um objeto JSON no seguinte formato, sem formatação Markdown extra:
+    Retorne APENAS um objeto JSON válido:
     {
-      "title": "Título curto e chamativo para a dica",
-      "tip": "Descrição curta, amigável e acionável (máximo 2 a 3 frases) em português.",
-      "category": "A categoria relacionada ao gasto (ex: Alimentação, Transporte, Lazer, etc.)",
-      "estimatedSavings": "Economia estimada realista baseada nos gastos (ex: 'R$ 40/mês', 'R$ 15/semana', ou semelhante)"
+      "title": "Título curto e específico",
+      "tip": "Descrição clara, humana e acionável em português (2 a 3 frases).",
+      "category": "Categoria relacionada",
+      "estimatedSavings": "Economia realista estimada (ex: 'R$ 120/mês')"
     }
 
     Dados do Usuário:
@@ -1773,11 +1973,12 @@ export async function generateTipOfTheDay(
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: AI_MODEL,
       contents: prompt,
       config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: "application/json",
-        systemInstruction: "Você é um consultor de economia pessoal focado em microeconomia comportamental. Forneça respostas estritamente em formato JSON válido."
+        systemInstruction: "Você é um consultor de microeconomia comportamental focado em economia prática mensurável em R$."
       }
     });
 
@@ -1788,4 +1989,3 @@ export async function generateTipOfTheDay(
     return fallback;
   }
 }
-

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
   Plus, 
   Search, 
@@ -30,9 +30,9 @@ import {
 } from "lucide-react";
 import { Receivable, ReceivablePayment, UserProfile, ReceivableStatus, ReceivableType, ReceivableRisk, CollectionPriority, Debtor, ReliabilityLevel } from "../types";
 import { db, auth } from "../lib/firebase";
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, where, getDocs } from "firebase/firestore";
+import { collection, setDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, where, getDocs } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
-import { cn, formatCurrency, formatDate, getDaysRemaining } from "../lib/utils";
+import { cn, formatCurrency, formatDate, getDaysRemaining, cleanData } from "../lib/utils";
 import { analyzeReceivableRisk, generateCollectionMessage, analyzeDebtorReliability, generateCollectionStrategy } from "../services/geminiService";
 import { handleFirestoreError, OperationType } from "../lib/error-handler";
 import { getActiveUserId } from "../lib/authUtils";
@@ -161,6 +161,27 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
   const [isLossSimOpen, setIsLossSimOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [viewingReceivable, setViewingReceivable] = useState<Receivable | null>(null);
+  const [openedDebtorFromReceivable, setOpenedDebtorFromReceivable] = useState(false);
+  const [isSubmittingReceivable, setIsSubmittingReceivable] = useState(false);
+  const [isSubmittingDebtor, setIsSubmittingDebtor] = useState(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  const submittingReceivableRef = useRef(false);
+  const submittingDebtorRef = useRef(false);
+  const submittingPaymentRef = useRef(false);
+
+  const uniqueDebtors = useMemo(() => {
+    const map = new Map<string, Debtor>();
+    for (const d of debtors) {
+      if (!d?.name) continue;
+      const key = d.name.trim().toLowerCase();
+      const existing = map.get(key);
+      if (!existing || (d.totalLent || 0) > (existing.totalLent || 0)) {
+        map.set(key, d);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [debtors]);
 
   // AI Strategy State
   const [isStrategyLoading, setIsStrategyLoading] = useState(false);
@@ -217,13 +238,28 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
 
   const handleAddReceivable = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingReceivableRef.current) return;
+
+    const debtor = debtors.find(d => d.id === formData.debtorId);
+    const personName = (formData.personName || debtor?.name || "").trim();
+    if (!formData.debtorId || !personName) {
+      ((window as any).mostrarMensagem || window.alert)("Selecione um devedor antes de salvar.");
+      return;
+    }
+    if (!formData.totalValue || formData.totalValue <= 0) {
+      ((window as any).mostrarMensagem || window.alert)("Informe um valor maior que zero.");
+      return;
+    }
+
+    submittingReceivableRef.current = true;
+    setIsSubmittingReceivable(true);
+
     try {
       const currentUid = auth.currentUser?.uid || userProfile?.uid || getActiveUserId();
-      const debtor = debtors.find(d => d.id === formData.debtorId);
       
       const newReceivable: Omit<Receivable, "id"> = {
         userId: currentUid,
-        personName: formData.personName,
+        personName,
         debtorId: formData.debtorId,
         totalValue: formData.totalValue,
         receivedValue: 0,
@@ -263,22 +299,24 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
       // Register a transaction for the money lent
       await transacoes.registrarTransacao({
         userId: currentUid,
-        title: `Empréstimo: ${formData.personName}`,
+        title: `Empréstimo: ${personName}`,
         value: formData.totalValue,
         type: "expense",
         category: "Empréstimos",
         date: formData.loanDate,
-        notes: `Dinheiro emprestado para ${formData.personName}. ${formData.notes || ""}`,
+        notes: `Dinheiro emprestado para ${personName}. ${formData.notes || ""}`,
         emotion: "racional",
         createdAt: new Date().toISOString()
       });
 
       // Update Debtor stats
-      if (formData.debtorId) {
+      if (formData.debtorId && auth.currentUser) {
         const dRef = doc(db, "debtors", formData.debtorId);
         await updateDoc(dRef, {
           totalLent: (debtor?.totalLent || 0) + formData.totalValue,
           lastLoanDate: formData.loanDate
+        }).catch((err) => {
+          console.warn("Notice: debtor stats update notice:", err);
         });
       }
 
@@ -294,20 +332,59 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
       });
     } catch (error) {
       console.error("Error adding receivable:", error);
-      setIsRiskAnalysisLoading(false);
       if (auth.currentUser) {
         handleFirestoreError(error, OperationType.CREATE, "receivables");
       }
+    } finally {
+      setIsRiskAnalysisLoading(false);
+      setIsSubmittingReceivable(false);
+      submittingReceivableRef.current = false;
     }
   };
 
   const handleAddDebtor = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingDebtorRef.current) return;
+
+    const trimmedName = debtorFormData.name.trim();
+    if (!trimmedName) {
+      ((window as any).mostrarMensagem || window.alert)("Informe o nome do devedor.");
+      return;
+    }
+
+    const existingDebtor = debtors.find(
+      d => d.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (existingDebtor) {
+      ((window as any).mostrarMensagem || window.alert)(`"${existingDebtor.name}" já está cadastrado(a) na sua lista de devedores.`);
+      setIsDebtorModalOpen(false);
+      setDebtorFormData({ name: "", phone: "", photoURL: "" });
+      if (openedDebtorFromReceivable) {
+        setFormData(prev => ({
+          ...prev,
+          debtorId: existingDebtor.id,
+          personName: existingDebtor.name
+        }));
+        setOpenedDebtorFromReceivable(false);
+        setIsAddModalOpen(true);
+      }
+      return;
+    }
+
+    submittingDebtorRef.current = true;
+    setIsSubmittingDebtor(true);
+
     try {
-      const currentUid = auth.currentUser?.uid || userProfile?.uid || getActiveUserId();
-      const newDebtor: Omit<Debtor, "id"> = {
+      const firebaseUser = auth.currentUser;
+      const currentUid = firebaseUser?.uid || userProfile?.uid || getActiveUserId();
+      const debtorRef = doc(collection(db, "debtors"));
+      const newDebtorId = firebaseUser
+        ? debtorRef.id
+        : `deb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      const baseDebtor: Omit<Debtor, "id"> = {
         userId: currentUid,
-        name: debtorFormData.name.trim(),
+        name: trimmedName,
         phone: debtorFormData.phone?.trim() || "",
         photoURL: debtorFormData.photoURL?.trim() || "",
         totalLent: 0,
@@ -318,22 +395,50 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
         createdAt: new Date().toISOString()
       };
 
-      await addDoc(collection(db, "debtors"), {
-        ...newDebtor,
-        createdAt: serverTimestamp()
-      });
+      if (firebaseUser) {
+        await setDoc(debtorRef, cleanData({
+          ...baseDebtor,
+          userId: firebaseUser.uid,
+          createdAt: serverTimestamp()
+        }));
+      } else {
+        try {
+          const LOCAL_DEBTORS_KEY = "finance_local_debtors_v1";
+          const raw = localStorage.getItem(LOCAL_DEBTORS_KEY);
+          const list: Debtor[] = raw ? JSON.parse(raw) : [];
+          const createdDebtor: Debtor = { id: newDebtorId, ...baseDebtor };
+          localStorage.setItem(LOCAL_DEBTORS_KEY, JSON.stringify([createdDebtor, ...list]));
+          window.dispatchEvent(new CustomEvent("local_debtors_changed"));
+        } catch (storageErr) {
+          console.warn("Erro ao salvar devedor localmente:", storageErr);
+        }
+      }
 
       setIsDebtorModalOpen(false);
       setDebtorFormData({ name: "", phone: "", photoURL: "" });
+
+      if (openedDebtorFromReceivable) {
+        setFormData(prev => ({
+          ...prev,
+          debtorId: newDebtorId,
+          personName: trimmedName
+        }));
+        setOpenedDebtorFromReceivable(false);
+        setIsAddModalOpen(true);
+      }
     } catch (error) {
       console.error("Error adding debtor:", error);
       if (auth.currentUser) {
         handleFirestoreError(error, OperationType.CREATE, "debtors");
       }
+    } finally {
+      setIsSubmittingDebtor(false);
+      submittingDebtorRef.current = false;
     }
   };
 
   const handleGenerateMessage = async (receivable: Receivable, tone: 'friendly' | 'neutral' | 'firm') => {
+    setSelectedReceivable(receivable);
     setIsGeneratingMessage(true);
     try {
       const debtor = debtors.find(d => d.id === receivable.debtorId);
@@ -349,7 +454,7 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
 
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedReceivable) return;
+    if (!selectedReceivable || submittingPaymentRef.current) return;
 
     if (paymentData.value <= 0) {
       ((window as any).mostrarMensagem || window.alert)("O valor do pagamento deve ser maior que zero.");
@@ -360,6 +465,9 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
       ((window as any).mostrarMensagem || window.alert)(`O valor do pagamento não pode ser maior que o saldo restante (${formatCurrency(selectedReceivable.remainingValue)}).`);
       return;
     }
+
+    submittingPaymentRef.current = true;
+    setIsSubmittingPayment(true);
 
     try {
       const currentUid = auth.currentUser?.uid || userProfile?.uid || getActiveUserId();
@@ -406,11 +514,13 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
       });
 
       // Update Debtor stats
-      if (selectedReceivable.debtorId) {
+      if (selectedReceivable.debtorId && auth.currentUser) {
         const debtor = debtors.find(d => d.id === selectedReceivable.debtorId);
         const dRef = doc(db, "debtors", selectedReceivable.debtorId);
         await updateDoc(dRef, {
           totalReceived: (debtor?.totalReceived || 0) + payment.value
+        }).catch((err) => {
+          console.warn("Notice: debtor payment stats update notice:", err);
         });
       }
 
@@ -430,6 +540,9 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
       }
     } catch (error) {
       console.error("Error adding payment:", error);
+    } finally {
+      setIsSubmittingPayment(false);
+      submittingPaymentRef.current = false;
     }
   };
 
@@ -460,7 +573,7 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
             Estratégia IA
           </button>
           <button 
-            onClick={() => setIsDebtorModalOpen(true)}
+            onClick={() => { setOpenedDebtorFromReceivable(false); setIsDebtorModalOpen(true); }}
             className="flex items-center justify-center gap-2 bg-white text-slate-900 border border-gray-200 px-6 py-4 rounded-2xl font-bold hover:bg-gray-50 transition-all active:scale-95"
           >
             <User size={20} />
@@ -916,7 +1029,7 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
                         setSelectedReceivable(viewingReceivable);
                         setIsPaymentModalOpen(true);
                       }}
-                      className="flex-1 py-4 rounded-2xl bg-white text-slate-900 font-bold text-sm hover:bg-white/90 transition-all"
+                      className="flex-1 py-4 rounded-2xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
                     >
                       Registrar Pagamento
                     </button>
@@ -963,21 +1076,22 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
                           required
                           value={formData.debtorId}
                           onChange={(e) => {
-                            const d = debtors.find(deb => deb.id === e.target.value);
+                            const d = uniqueDebtors.find(deb => deb.id === e.target.value) || debtors.find(deb => deb.id === e.target.value);
                             setFormData({ ...formData, debtorId: e.target.value, personName: d?.name || "" });
                           }}
                           className="w-full pl-12 pr-4 py-4 rounded-2xl border border-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-dark/5 bg-gray-50 font-bold appearance-none"
                         >
                           <option value="">Selecione um devedor</option>
-                          {debtors.map(d => (
+                          {uniqueDebtors.map(d => (
                             <option key={d.id} value={d.id}>{d.name}</option>
                           ))}
                         </select>
                       </div>
                       <button 
                         type="button"
-                        onClick={() => { setIsAddModalOpen(false); setIsDebtorModalOpen(true); }}
-                        className="p-4 bg-white/5 text-slate-900 rounded-2xl hover:bg-white/10 transition-all"
+                        onClick={() => { setOpenedDebtorFromReceivable(true); setIsAddModalOpen(false); setIsDebtorModalOpen(true); }}
+                        className="p-4 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-2xl hover:bg-emerald-100 transition-all"
+                        title="Cadastrar novo devedor"
                       >
                         <Plus size={24} />
                       </button>
@@ -1049,11 +1163,11 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
                   </div>
 
                   <button 
-                    disabled={isRiskAnalysisLoading}
+                    disabled={isRiskAnalysisLoading || isSubmittingReceivable}
                     type="submit"
-                    className="w-full bg-white text-slate-900 py-5 rounded-2xl font-black text-lg shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:bg-white/90 transition-all active:scale-[0.98] disabled:opacity-50"
+                    className="w-full bg-emerald-600 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-[0.98] disabled:opacity-50"
                   >
-                    {isRiskAnalysisLoading ? "Analisando Risco com IA..." : "Salvar Registro"}
+                    {isRiskAnalysisLoading ? "Analisando Risco com IA..." : isSubmittingReceivable ? "Salvando..." : "Salvar Registro"}
                   </button>
                 </form>
               </div>
@@ -1125,10 +1239,11 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
                   </div>
 
                   <button 
+                    disabled={isSubmittingPayment}
                     type="submit"
-                    className="w-full bg-primary-green text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-primary-green/20 hover:bg-primary-green/90 transition-all active:scale-[0.98]"
+                    className="w-full bg-primary-green text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-primary-green/20 hover:bg-primary-green/90 transition-all active:scale-[0.98] disabled:opacity-50"
                   >
-                    Confirmar Recebimento
+                    {isSubmittingPayment ? "Confirmando..." : "Confirmar Recebimento"}
                   </button>
                 </form>
               </div>
@@ -1144,7 +1259,7 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsDebtorModalOpen(false)}
+              onClick={() => { setIsDebtorModalOpen(false); setOpenedDebtorFromReceivable(false); }}
               className="absolute inset-0 bg-white/40 backdrop-blur-sm"
             />
             <motion.div 
@@ -1156,7 +1271,7 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
               <div className="p-8">
                 <div className="flex items-center justify-between mb-8">
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Novo Devedor</h2>
-                  <button onClick={() => setIsDebtorModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                  <button onClick={() => { setIsDebtorModalOpen(false); setOpenedDebtorFromReceivable(false); }} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
                     <X size={24} className="text-gray-400" />
                   </button>
                 </div>
@@ -1203,10 +1318,11 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
                   </div>
 
                   <button 
+                    disabled={isSubmittingDebtor}
                     type="submit"
-                    className="w-full bg-white text-slate-900 py-5 rounded-2xl font-black text-lg shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:bg-white/90 transition-all active:scale-[0.98]"
+                    className="w-full bg-emerald-600 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-[0.98] disabled:opacity-50"
                   >
-                    Cadastrar Devedor
+                    {isSubmittingDebtor ? "Cadastrando..." : "Cadastrar Devedor"}
                   </button>
                 </form>
               </div>
@@ -1259,7 +1375,7 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
                   </button>
                   <button 
                     onClick={() => {
-                      const phone = debtors.find(d => d.name === selectedReceivable?.personName)?.phone;
+                      const phone = debtors.find(d => d.id === selectedReceivable?.debtorId || d.name === selectedReceivable?.personName)?.phone;
                       if (phone) {
                         window.open(`https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(collectionMessage)}`, '_blank');
                       } else {
@@ -1347,7 +1463,7 @@ export const Receivables: React.FC<ReceivablesProps> = ({ debtors, userProfile }
 
                 <button 
                   onClick={() => setIsLossSimOpen(false)}
-                  className="w-full mt-8 bg-white text-slate-900 py-5 rounded-2xl font-black text-lg shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:bg-white/90 transition-all"
+                  className="w-full mt-8 bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-lg hover:bg-slate-800 transition-all"
                 >
                   Entendi o Risco
                 </button>

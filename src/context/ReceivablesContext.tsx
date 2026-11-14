@@ -1,18 +1,63 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { Receivable } from "../types";
 import { db, auth } from "../lib/firebase";
-import { collection, onSnapshot, query, where, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { collection, onSnapshot, query, where, setDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { getActiveUserId } from "../lib/authUtils";
+import { cleanData } from "../lib/utils";
 
 const LOCAL_STORAGE_KEY = "finance_local_receivables_v1";
+
+function getReceivableFingerprint(r: Receivable): string {
+  return [
+    (r.personName || "").trim().toLowerCase(),
+    Number(r.totalValue || 0).toFixed(2),
+    r.loanDate || "",
+    r.dueDate || ""
+  ].join("|");
+}
+
+export function dedupeReceivables(items: Receivable[]): Receivable[] {
+  const byId = new Map<string, Receivable>();
+  for (const item of items) {
+    if (!item || !item.id) continue;
+    const existing = byId.get(item.id);
+    if (!existing) {
+      byId.set(item.id, item);
+    }
+  }
+
+  const all = Array.from(byId.values());
+  const remoteFingerprints = new Set(
+    all
+      .filter(r => !r.id.startsWith("rec_"))
+      .map(getReceivableFingerprint)
+  );
+
+  const seenOfflineFingerprints = new Set<string>();
+  const result: Receivable[] = [];
+
+  for (const item of all) {
+    if (item.id.startsWith("rec_")) {
+      const fp = getReceivableFingerprint(item);
+      if (remoteFingerprints.has(fp) || seenOfflineFingerprints.has(fp)) {
+        continue;
+      }
+      seenOfflineFingerprints.add(fp);
+    }
+    result.push(item);
+  }
+
+  result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return result;
+}
 
 export function getStoredReceivables(): Receivable[] {
   try {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) return dedupeReceivables(parsed);
     }
   } catch (e) {
     console.warn("Erro ao carregar recebíveis locais:", e);
@@ -22,7 +67,8 @@ export function getStoredReceivables(): Receivable[] {
 
 export function saveStoredReceivables(items: Receivable[]) {
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(items));
+    const cleanItems = dedupeReceivables(items);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleanItems));
     window.dispatchEvent(new CustomEvent("local_receivables_changed"));
   } catch (e) {
     console.warn("Erro ao salvar recebíveis locais:", e);
@@ -42,6 +88,7 @@ const ReceivablesContext = createContext<ReceivablesContextType | undefined>(und
 export function ReceivablesProvider({ children }: { children: ReactNode }) {
   const [receivables, setReceivables] = useState<Receivable[]>(getStoredReceivables);
   const [loading, setLoading] = useState(false);
+  const pendingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -67,22 +114,37 @@ export function ReceivablesProvider({ children }: { children: ReactNode }) {
         );
 
         unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
-          const remoteData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          } as Receivable));
+          const remoteMap = new Map<string, Receivable>();
+          snapshot.docs.forEach(docSnap => {
+            remoteMap.set(docSnap.id, {
+              id: docSnap.id,
+              ...docSnap.data()
+            } as Receivable);
+            pendingIdsRef.current.delete(docSnap.id);
+          });
 
+          const remoteData = Array.from(remoteMap.values());
+          const remoteFingerprints = new Set(remoteData.map(getReceivableFingerprint));
           const localList = getStoredReceivables();
-          const merged = [...remoteData];
+          const mergedMap = new Map<string, Receivable>();
+
+          for (const remoteItem of remoteData) {
+            mergedMap.set(remoteItem.id, remoteItem);
+          }
+
           for (const item of localList) {
-            if (!merged.some(r => r.id === item.id)) {
-              if (item.userId === user.uid || !item.userId || item.userId === "default_user") {
-                merged.push({ ...item, userId: user.uid });
-              }
+            if (mergedMap.has(item.id)) continue;
+            const belongsToUser = item.userId === user.uid || !item.userId || item.userId === "default_user";
+            if (!belongsToUser) continue;
+
+            if (pendingIdsRef.current.has(item.id)) {
+              mergedMap.set(item.id, { ...item, userId: user.uid });
+            } else if (item.id.startsWith("rec_") && !remoteFingerprints.has(getReceivableFingerprint(item))) {
+              mergedMap.set(item.id, { ...item, userId: user.uid });
             }
           }
-          merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
+          const merged = dedupeReceivables(Array.from(mergedMap.values()));
           setReceivables(merged);
           saveStoredReceivables(merged);
           setLoading(false);
@@ -105,51 +167,59 @@ export function ReceivablesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addReceivable = async (item: Omit<Receivable, "id" | "userId" | "createdAt">): Promise<string> => {
-    const uid = auth.currentUser?.uid || getActiveUserId();
-    const tempId = `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const firebaseUser = auth.currentUser;
+    const uid = firebaseUser?.uid || getActiveUserId();
     const nowIso = new Date().toISOString();
+    const cleanedItem = cleanData(item);
+
+    const docId = firebaseUser
+      ? doc(collection(db, "receivables")).id
+      : `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     const newReceivable: Receivable = {
-      ...item,
-      id: tempId,
+      ...cleanedItem,
+      id: docId,
       userId: uid,
       createdAt: nowIso
     };
 
+    if (firebaseUser) {
+      pendingIdsRef.current.add(docId);
+    }
+
     const currentList = getStoredReceivables();
-    const updatedList = [newReceivable, ...currentList.filter(r => r.id !== tempId)];
+    const updatedList = dedupeReceivables([newReceivable, ...currentList.filter(r => r.id !== docId)]);
     saveStoredReceivables(updatedList);
     setReceivables(updatedList);
 
-    if (auth.currentUser) {
+    if (firebaseUser) {
       try {
-        const docRef = await addDoc(collection(db, "receivables"), {
-          ...item,
-          userId: auth.currentUser.uid,
+        const firestorePayload = cleanData({
+          ...cleanedItem,
+          userId: firebaseUser.uid,
           createdAt: nowIso
         });
-        const firestoreId = docRef.id;
-        const syncedList = getStoredReceivables().map(r => r.id === tempId ? { ...r, id: firestoreId, userId: auth.currentUser!.uid } : r);
-        saveStoredReceivables(syncedList);
-        setReceivables(syncedList);
-        return firestoreId;
+        await setDoc(doc(db, "receivables", docId), firestorePayload);
+        return docId;
       } catch (err) {
+        pendingIdsRef.current.delete(docId);
         console.warn("Notice: receivable saved locally, Firestore sync notice:", err);
       }
     }
 
-    return tempId;
+    return docId;
   };
 
   const updateReceivable = async (id: string, updates: Partial<Receivable>) => {
+    const cleanedUpdates = cleanData(updates);
     const currentList = getStoredReceivables();
-    const updatedList = currentList.map(r => r.id === id ? { ...r, ...updates } : r);
+    const updatedList = currentList.map(r => r.id === id ? { ...r, ...cleanedUpdates } : r);
     saveStoredReceivables(updatedList);
     setReceivables(updatedList);
 
     if (auth.currentUser && !id.startsWith("rec_")) {
       try {
-        await updateDoc(doc(db, "receivables", id), updates);
+        await updateDoc(doc(db, "receivables", id), cleanedUpdates);
       } catch (err) {
         console.warn("Notice: Firestore updateReceivable notice:", err);
       }
@@ -157,6 +227,7 @@ export function ReceivablesProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteReceivable = async (id: string) => {
+    pendingIdsRef.current.delete(id);
     const currentList = getStoredReceivables();
     const updatedList = currentList.filter(r => r.id !== id);
     saveStoredReceivables(updatedList);

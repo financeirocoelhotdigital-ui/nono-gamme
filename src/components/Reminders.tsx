@@ -540,7 +540,9 @@ function ReminderCard({ reminder, onDone, onDelete, onExecute, accounts }: {
   accounts: any[]
 }) {
   const [showExecute, setShowExecute] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState(accounts[0]?.id || "");
+  const [selectedAccount, setSelectedAccount] = useState(
+    accounts.find(a => a.isDefault)?.id || accounts[0]?.id || ""
+  );
 
   const isOverdue = new Date(reminder.date) < new Date() && reminder.status === "ativo";
 

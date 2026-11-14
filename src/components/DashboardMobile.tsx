@@ -10,6 +10,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { differenceInDays } from "date-fns";
 import { BankIcon } from "./BankIcon";
+import { UserAvatar } from "./UserAvatar";
 import { calculateFinancialProtection } from "../lib/financialCalculations";
 import { useContas } from "../context/ContasContext";
 import { useCartoes } from "../context/CartoesContext";
@@ -263,19 +264,11 @@ export const DashboardMobile = React.memo(function DashboardMobile({
             onClick={() => (window as any).openSidebar && (window as any).openSidebar()}
             className="flex items-center gap-3 text-left transition-transform active:scale-95"
           >
-            {userProfile.photoURL ? (
-              <img
-                src={userProfile.photoURL}
-                alt="Avatar"
-                className="w-11 h-11 rounded-full border-2 border-white shadow-xs object-cover flex-shrink-0"
-                referrerPolicy="no-referrer"
-                loading="lazy"
-              />
-            ) : (
-              <div className="w-11 h-11 rounded-full bg-[#836254] text-white font-black text-sm flex items-center justify-center shadow-xs border-2 border-white flex-shrink-0">
-                {(userProfile.displayName || "C").charAt(0).toUpperCase()}
-              </div>
-            )}
+            <UserAvatar
+              userProfile={userProfile}
+              size="md"
+              className="border-2 border-white shadow-xs"
+            />
             <div>
               <h1 className="text-sm sm:text-base font-black text-slate-900 tracking-tight leading-tight flex items-center gap-1">
                 Olá, {userProfile.displayName?.split(" ")[0] || "Tiago"} <span className="inline-block animate-bounce text-sm">👋</span>
@@ -757,14 +750,21 @@ export const DashboardMobile = React.memo(function DashboardMobile({
                   </div>
 
                   <div className="space-y-2.5">
-                    {accounts.map(acc => (
+                    {[...accounts].sort((a, b) => Number(!!b.isDefault) - Number(!!a.isDefault)).map(acc => (
                       <div key={acc.id} className="p-3.5 rounded-2xl bg-gray-50/50 hover:bg-white border border-gray-100 hover:shadow-sm transition-all flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-xl border border-gray-100 bg-white flex items-center justify-center text-slate-900 flex-shrink-0 shadow-sm">
                             {acc.institution ? <BankIcon bankName={acc.institution} className="w-7 h-7 rounded-lg" /> : <Wallet size={18} />}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-xs font-black text-slate-900 truncate">{acc.name}</p>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <p className="text-xs font-black text-slate-900 truncate">{acc.name}</p>
+                              {acc.isDefault && (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[8px] font-black uppercase tracking-wider">
+                                  Principal
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider truncate mt-0.5">
                               {acc.institution || "Conta Corrente"}
                             </p>

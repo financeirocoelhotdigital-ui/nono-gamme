@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 import Sidebar from "./Sidebar";
 import { UserProfile, Debt, Receivable } from "../types";
 import { FloatingAIChat } from "./FloatingAIChat";
+import { UserAvatar } from "./UserAvatar";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -177,6 +178,8 @@ export function Layout({ children, activeTab, setActiveTab, user, userProfile, o
     { id: "reports", label: "Relatórios" },
     { id: "categories", label: "Categorias" },
     { id: "settings", label: "Configurações" },
+    { id: "avatar", label: "Meu Avatar" },
+    { id: "support", label: "Falar com Suporte" },
     { id: "admin", label: "Painel Admin" },
   ];
 
@@ -277,9 +280,13 @@ export function Layout({ children, activeTab, setActiveTab, user, userProfile, o
                       <p className="text-xs font-black text-slate-900 uppercase tracking-tight">{userProfile?.displayName}</p>
                       <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest">{isAdminUser ? "Administrador" : "Premium Member"}</p>
                     </div>
-                    <div className="w-11 h-11 rounded-xl bg-white text-emerald-600 flex items-center justify-center font-black shadow-lg shadow-primary-dark/10">
-                      {userProfile?.displayName?.charAt(0)}
-                    </div>
+                    <UserAvatar
+                      userProfile={userProfile}
+                      size="md"
+                      className="rounded-xl shadow-lg shadow-primary-dark/10"
+                      onClick={!isAdminUser ? () => setActiveTab("avatar") : undefined}
+                      title="Personalizar Meu Avatar"
+                    />
                     <button
                       onClick={onLogout}
                       className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ml-1 border border-transparent hover:border-rose-100"

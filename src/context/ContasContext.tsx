@@ -1,11 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo, useRef } from "react";
 import { Account, ReconciliationHistory } from "../types";
 import { db, auth } from "../lib/firebase";
-import { collection, onSnapshot, query, where, orderBy, addDoc, doc, updateDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, where, addDoc, doc, updateDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useTransacoes } from "./TransacoesContext";
 import { calculateAccountBalance } from "../lib/financialCalculations";
 import { conciliarConta, generateAdjustmentTransaction } from "../lib/reconciliation";
+import { getActiveUserId } from "../lib/authUtils";
 
 import { transacoes } from "../modules/transacoesModule";
 import { contas } from "../modules/contasModule";
@@ -27,15 +28,20 @@ const ContasContext = createContext<ContasContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = "finance_local_accounts_v1";
 
-const DEFAULT_INITIAL_ACCOUNTS: Account[] = [];
-
 export function getStoredAccounts(): Account[] {
   try {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
-        return parsed.filter(a => a.id !== "acc_principal" && a.userId !== "default_user");
+        const activeUid = getActiveUserId();
+        return parsed.filter((a: any) => {
+          if (!a || !a.id || a.id === "acc_principal") return false;
+          if (!activeUid || activeUid === "default_user") {
+            return !a.userId || a.userId === "default_user";
+          }
+          return a.userId === activeUid || !a.userId || a.userId === "default_user";
+        });
       }
     }
   } catch (e) {
@@ -55,6 +61,9 @@ export function saveStoredAccounts(accounts: Account[]) {
 
 export function ContasProvider({ children }: { children: ReactNode }) {
   const [rawAccounts, setRawAccounts] = useState<Account[]>(getStoredAccounts);
+  const rawAccountsRef = useRef<Account[]>(rawAccounts);
+  rawAccountsRef.current = rawAccounts;
+
   const [reconciliationHistory, setReconciliationHistory] = useState<ReconciliationHistory[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -65,8 +74,10 @@ export function ContasProvider({ children }: { children: ReactNode }) {
       setRawAccounts(getStoredAccounts());
     };
     window.addEventListener("local_accounts_changed", handleStorageChange);
+    window.addEventListener("user_profile_updated", handleStorageChange);
     return () => {
       window.removeEventListener("local_accounts_changed", handleStorageChange);
+      window.removeEventListener("user_profile_updated", handleStorageChange);
     };
   }, []);
 
@@ -86,20 +97,31 @@ export function ContasProvider({ children }: { children: ReactNode }) {
         );
 
         unsubscribeAccounts = onSnapshot(qAccounts, (snapshot) => {
-          const accountsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
+          const accountsData = snapshot.docs.map(d => ({
+            id: d.id,
+            ...d.data()
           } as Account));
 
           const localList = getStoredAccounts();
           const merged = [...accountsData];
+          const toSync: Account[] = [];
+
           for (const item of localList) {
             if (!merged.some(r => r.id === item.id)) {
               if (item.userId === user.uid || !item.userId || item.userId === "default_user") {
-                merged.push({ ...item, userId: user.uid });
+                const normalized = { ...item, userId: user.uid, active: item.active !== false };
+                merged.push(normalized);
+                toSync.push(normalized);
               }
             }
           }
+
+          if (toSync.length > 0) {
+            toSync.forEach(acc => {
+              contas.criarConta(user.uid, acc).catch(() => {});
+            });
+          }
+
           merged.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
           setRawAccounts(merged);
@@ -119,9 +141,9 @@ export function ContasProvider({ children }: { children: ReactNode }) {
         );
 
         unsubscribeHistory = onSnapshot(qHistory, (snapshot) => {
-          const historyData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
+          const historyData = snapshot.docs.map(d => ({
+            id: d.id,
+            ...d.data()
           } as ReconciliationHistory));
           historyData.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
           setReconciliationHistory(historyData);
@@ -149,6 +171,7 @@ export function ContasProvider({ children }: { children: ReactNode }) {
   const accounts = useMemo(() => {
     return rawAccounts.map(acc => ({
       ...acc,
+      active: acc.active !== false,
       balance: calculateAccountBalance(acc, transactions)
     }));
   }, [rawAccounts, transactions]);
@@ -157,7 +180,7 @@ export function ContasProvider({ children }: { children: ReactNode }) {
     const account = accounts.find(a => a.id === accountId);
     if (!account) return;
 
-    const uid = auth.currentUser?.uid || "default_user";
+    const uid = getActiveUserId();
     const result = conciliarConta(account, transactions);
     
     const history: Partial<ReconciliationHistory> = {
@@ -182,7 +205,7 @@ export function ContasProvider({ children }: { children: ReactNode }) {
   };
 
   const adjustAccountBalance = async (accountId: string, difference: number) => {
-    const uid = auth.currentUser?.uid || "default_user";
+    const uid = getActiveUserId();
     const adjustment = generateAdjustmentTransaction(uid, accountId, difference);
     await transacoes.registrarTransacao(adjustment as any);
     
@@ -199,8 +222,10 @@ export function ContasProvider({ children }: { children: ReactNode }) {
   };
 
   const addAccount = async (accountData: Omit<Account, "id" | "userId">) => {
-    const uid = auth.currentUser?.uid || "default_user";
+    const uid = getActiveUserId();
     const newId = doc(collection(db, "accounts")).id;
+    const currentAccounts = rawAccountsRef.current;
+    const shouldBeDefault = accountData.isDefault !== undefined ? !!accountData.isDefault : currentAccounts.length === 0;
 
     const newAccount: Account = {
       id: newId,
@@ -212,25 +237,27 @@ export function ContasProvider({ children }: { children: ReactNode }) {
       initialBalance: accountData.initialBalance ?? accountData.balance ?? 0,
       color: accountData.color || "#10b981",
       icon: accountData.icon || "landmark",
-      isDefault: !!accountData.isDefault,
+      isDefault: shouldBeDefault,
       active: accountData.active !== false,
       notes: accountData.notes || "",
       balanceThreshold: accountData.balanceThreshold,
       createdAt: new Date().toISOString()
     };
 
-    setRawAccounts(prev => {
-      let updated = [...prev.filter(a => a.id !== newAccount.id)];
-      if (newAccount.isDefault) {
-        updated = updated.map(a => ({ ...a, isDefault: false }));
-      }
-      updated.push(newAccount);
-      saveStoredAccounts(updated);
-      return updated;
-    });
+    let nextAccounts = [...currentAccounts.filter(a => a.id !== newAccount.id)];
+    if (newAccount.isDefault) {
+      nextAccounts = nextAccounts.map(a => ({ ...a, isDefault: false }));
+    }
+    nextAccounts.push(newAccount);
+    rawAccountsRef.current = nextAccounts;
+    setRawAccounts(nextAccounts);
+    saveStoredAccounts(nextAccounts);
 
     try {
       await contas.criarConta(uid, newAccount);
+      if (newAccount.isDefault) {
+        await contas.definirComoPadrao(newAccount.id, nextAccounts);
+      }
     } catch (err) {
       console.warn("Aviso ao salvar conta no Firestore (mantida localmente):", err);
     }
@@ -239,53 +266,74 @@ export function ContasProvider({ children }: { children: ReactNode }) {
   };
 
   const updateAccount = async (accountId: string, accountData: Partial<Account>) => {
-    setRawAccounts(prev => {
-      let updated = prev.map(acc => {
-        if (acc.id === accountId) {
-          return { ...acc, ...accountData };
-        }
-        if (accountData.isDefault) {
-          return { ...acc, isDefault: false };
-        }
-        return acc;
-      });
-      saveStoredAccounts(updated);
-      return updated;
+    const currentAccounts = rawAccountsRef.current;
+    const nextAccounts = currentAccounts.map(acc => {
+      if (acc.id === accountId) {
+        return { ...acc, ...accountData };
+      }
+      if (accountData.isDefault) {
+        return { ...acc, isDefault: false };
+      }
+      return acc;
     });
+    rawAccountsRef.current = nextAccounts;
+    setRawAccounts(nextAccounts);
+    saveStoredAccounts(nextAccounts);
 
     try {
       await contas.atualizarConta(accountId, accountData);
+      if (accountData.isDefault) {
+        await contas.definirComoPadrao(accountId, nextAccounts);
+      }
     } catch (err) {
       console.warn("Aviso ao atualizar conta no Firestore:", err);
     }
   };
 
   const deleteAccount = async (accountId: string) => {
-    setRawAccounts(prev => {
-      const updated = prev.filter(acc => acc.id !== accountId);
-      saveStoredAccounts(updated);
-      return updated;
-    });
+    const currentAccounts = rawAccountsRef.current;
+    const deletedAccount = currentAccounts.find(acc => acc.id === accountId);
+    let nextAccounts = currentAccounts.filter(acc => acc.id !== accountId);
+
+    // If the deleted account was the default and other active accounts remain, promote the first active one
+    let promotedAccountId: string | null = null;
+    if (deletedAccount?.isDefault && nextAccounts.length > 0 && !nextAccounts.some(a => a.isDefault)) {
+      const candidate = nextAccounts.find(a => a.active !== false) || nextAccounts[0];
+      if (candidate) {
+        promotedAccountId = candidate.id;
+        nextAccounts = nextAccounts.map(a => ({
+          ...a,
+          isDefault: a.id === candidate.id
+        }));
+      }
+    }
+
+    rawAccountsRef.current = nextAccounts;
+    setRawAccounts(nextAccounts);
+    saveStoredAccounts(nextAccounts);
 
     try {
       await contas.deletarConta(accountId);
+      if (promotedAccountId) {
+        await contas.definirComoPadrao(promotedAccountId, nextAccounts);
+      }
     } catch (err) {
       console.warn("Aviso ao deletar conta do Firestore:", err);
     }
   };
 
   const setDefaultAccount = async (accountId: string) => {
-    setRawAccounts(prev => {
-      const updated = prev.map(acc => ({
-        ...acc,
-        isDefault: acc.id === accountId
-      }));
-      saveStoredAccounts(updated);
-      return updated;
-    });
+    const currentAccounts = rawAccountsRef.current;
+    const nextAccounts = currentAccounts.map(acc => ({
+      ...acc,
+      isDefault: acc.id === accountId
+    }));
+    rawAccountsRef.current = nextAccounts;
+    setRawAccounts(nextAccounts);
+    saveStoredAccounts(nextAccounts);
 
     try {
-      await contas.definirComoPadrao(accountId, rawAccounts);
+      await contas.definirComoPadrao(accountId, nextAccounts);
     } catch (err) {
       console.warn("Aviso ao definir conta padrão no Firestore:", err);
     }

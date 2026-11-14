@@ -351,12 +351,20 @@ export function InvestmentProvider({ children }: { children: ReactNode }) {
     const investment = currentInvs.find(i => i.id === contribution.investmentId);
     if (investment) {
       let newValue = investment.investedValue;
-      if (contribution.type === "aporte" || contribution.type === "rendimento") {
+      if (contribution.type === "aporte") {
         newValue += contribution.value;
       } else if (contribution.type === "resgate") {
-        newValue -= contribution.value;
+        newValue = Math.max(0, newValue - contribution.value);
       }
-      const updatedInvs = currentInvs.map(i => i.id === investment.id ? { ...i, investedValue: newValue } : i);
+      const updatedInvs = currentInvs.map(i => i.id === investment.id ? {
+        ...i,
+        investedValue: newValue,
+        currentValue: contribution.type === "rendimento"
+          ? (i.currentValue || i.investedValue) + contribution.value
+          : contribution.type === "aporte"
+            ? (i.currentValue || i.investedValue) + contribution.value
+            : Math.max(0, (i.currentValue || i.investedValue) - contribution.value)
+      } : i);
       saveStoredInvestments(updatedInvs);
       setInvestments(updatedInvs);
 

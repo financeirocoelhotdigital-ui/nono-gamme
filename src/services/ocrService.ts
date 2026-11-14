@@ -1,4 +1,4 @@
-import { generateContentServer, Type } from "./geminiClient";
+import { generateContentServer, Type, ThinkingLevel } from "./geminiClient";
 
 export interface ExtractedReceiptData {
   establishment: string;
@@ -11,17 +11,16 @@ export interface ExtractedReceiptData {
 
 export const extractDataFromReceipt = async (base64Image: string, availableCategories: string[]): Promise<ExtractedReceiptData> => {
   const prompt = `
-    Analyze this receipt image and extract the following information:
-    1. All visible text in the receipt (raw text).
-    2. Structured data in JSON format:
-       - establishment (name of the store/market)
-       - date (in ISO format YYYY-MM-DD)
-       - total (total value as a number)
-       - items (list of products with name and value)
-       - category (suggest one of the following categories: ${availableCategories.join(", ")})
+    Analise esta imagem de nota fiscal, cupom fiscal ou comprovante (PIX, cartão, mercado) e extraia com máxima precisão:
+    1. Todo o texto visível no documento (rawText).
+    2. Dados estruturados em JSON:
+       - establishment: nome do estabelecimento / recebedor.
+       - date: data da compra no formato ISO YYYY-MM-DD (converta DD/MM/YYYY para YYYY-MM-DD; se não houver data visível, use ${new Date().toISOString().split("T")[0]}).
+       - total: valor total numérico (ex: R$ 1.250,40 -> 1250.40).
+       - items: lista de itens/produtos com nome e valor numérico (se não houver itens discriminados, crie 1 item com o resumo da compra e o valor total).
+       - category: escolha a melhor categoria entre: ${availableCategories.join(", ") || "Alimentação, Mercado, Transporte, Saúde, Lazer, Compras, Outros"}.
 
-    Return a JSON object with the fields: rawText, establishment, date, total, items, category.
-    Return ONLY the JSON object.
+    Retorne APENAS o objeto JSON válido.
   `;
 
   const imagePart = {
@@ -33,9 +32,10 @@ export const extractDataFromReceipt = async (base64Image: string, availableCateg
 
   try {
     const response = await generateContentServer({
-      model: "gemini-3.8-flash",
+      model: "gemini-4-hydrogen",
       contents: { parts: [imagePart, { text: prompt }] },
       config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,

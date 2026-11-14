@@ -1,8 +1,9 @@
 import { db, auth } from "../lib/firebase";
-import { doc, updateDoc, getDoc, setDoc, deleteDoc, writeBatch, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, updateDoc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { Account, Transaction } from "../types";
 import { handleFirestoreError, OperationType } from "../lib/error-handler";
 import { cleanData } from "../lib/utils";
+import { getActiveUserId } from "../lib/authUtils";
 
 export const contas = {
   async recalcularSaldo(accountId: string) {
@@ -60,20 +61,26 @@ export const contas = {
   },
   
   async criarConta(userId: string, accountData: Omit<Account, 'id'> & { id?: string }) {
+    const activeUid = auth.currentUser?.uid || userId || getActiveUserId();
+    const accountRef = accountData.id ? doc(db, "accounts", accountData.id) : doc(collection(db, "accounts"));
+    const cleanAccountData = cleanData(accountData);
+    const newAccount = { ...cleanAccountData, id: accountRef.id, userId: activeUid };
+
+    if (!auth.currentUser?.uid) {
+      return newAccount;
+    }
+
     try {
-      const accountRef = accountData.id ? doc(db, "accounts", accountData.id) : doc(collection(db, "accounts"));
-      const cleanAccountData = cleanData(accountData);
-      const newAccount = { ...cleanAccountData, id: accountRef.id, userId };
-      
-      await setDoc(accountRef, newAccount);
+      await setDoc(accountRef, newAccount, { merge: true });
       return newAccount;
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, "accounts");
-      return null;
+      return newAccount;
     }
   },
 
   async atualizarConta(accountId: string, accountData: Partial<Account>) {
+    if (!auth.currentUser?.uid) return;
     try {
       const accountRef = doc(db, "accounts", accountId);
       const cleanAccountData = cleanData(accountData);
@@ -83,18 +90,17 @@ export const contas = {
     }
   },
 
-    async deletarConta(accountId: string) {
+  async deletarConta(accountId: string) {
+    if (!auth.currentUser?.uid) return;
     try {
-      const uid = auth.currentUser?.uid;
-      if (!uid) return;
+      const uid = auth.currentUser.uid;
       
       const q = query(collection(db, "transactions"), where("userId", "==", uid));
       const querySnapshot = await getDocs(q);
-      const batch = writeBatch(db);
       
       let hasTransactions = false;
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
         if (data.accountId === accountId || data.toAccountId === accountId) {
           hasTransactions = true;
         }
@@ -116,16 +122,40 @@ export const contas = {
     if (!uid) return;
 
     try {
-      const batch = writeBatch(db);
-      accounts.forEach(acc => {
-        if (acc.isDefault && acc.id !== accountId) {
-          batch.update(doc(db, "accounts", acc.id), { isDefault: false });
+      const targetAccount = accounts.find(acc => acc.id === accountId);
+      const unsetPromises = accounts
+        .filter(acc => acc.id !== accountId && acc.isDefault)
+        .map(acc => updateDoc(doc(db, "accounts", acc.id), { isDefault: false }).catch(() => {}));
+
+      // Also query Firestore in case any other remote doc had isDefault: true
+      try {
+        const qDefaults = query(
+          collection(db, "accounts"),
+          where("userId", "==", uid),
+          where("isDefault", "==", true)
+        );
+        const snap = await getDocs(qDefaults);
+        snap.docs.forEach(d => {
+          if (d.id !== accountId) {
+            unsetPromises.push(updateDoc(doc(db, "accounts", d.id), { isDefault: false }).catch(() => {}));
+          }
+        });
+      } catch {}
+
+      await Promise.allSettled(unsetPromises);
+
+      const targetRef = doc(db, "accounts", accountId);
+      try {
+        await updateDoc(targetRef, { isDefault: true });
+      } catch {
+        if (targetAccount) {
+          const cleanTarget = cleanData({ ...targetAccount, userId: uid, isDefault: true });
+          await setDoc(targetRef, cleanTarget, { merge: true });
         }
-      });
-      batch.update(doc(db, "accounts", accountId), { isDefault: true });
-      await batch.commit();
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, "accounts");
     }
   }
 };
+

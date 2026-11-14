@@ -4,8 +4,9 @@ import {
   ShieldCheck, Plus, AlertCircle, TrendingUp, TrendingDown, Calculator, 
   Sparkles, Zap, ShieldAlert, Info, ArrowRight, Clock, Target, Heart, 
   CheckCircle2, ArrowDownLeft, ArrowUpRight, History, Trash2, Wallet, 
-  Landmark, Calendar, X, PiggyBank, Award
+  Landmark, Calendar, X, Award
 } from "lucide-react";
+import { ProPiggyIcon } from "./AnimatedPiggy";
 import { motion, AnimatePresence } from "framer-motion";
 import { Transaction, Debt, UserProfile, FamilyMember, Account, Goal } from "../types";
 import { analyzeFinancialProtection } from "../services/geminiService";
@@ -604,7 +605,7 @@ export const EmergencyReserve: React.FC<EmergencyReserveProps> = ({ userProfile,
 
             {contributions.length === 0 ? (
               <div className="py-8 text-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50">
-                <PiggyBank size={32} className="mx-auto text-slate-300 mb-2" />
+                <ProPiggyIcon size={32} className="mx-auto text-slate-300 mb-2" />
                 <p className="text-xs font-bold text-slate-600">Nenhum aporte registrado ainda</p>
                 <p className="text-[11px] text-slate-400 max-w-sm mx-auto mt-1">
                   Clique em "Novo Aporte" no topo para começar a construir ou reforçar sua reserva de emergência.

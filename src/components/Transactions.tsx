@@ -1759,6 +1759,7 @@ export function Transactions({
             subCategories={subCategories}
             tags={tags}
             transactions={transactions}
+            defaultAccountId={filterAccount !== "all" ? filterAccount : undefined}
           />
         )}
         {isAdding && addingType === "expense" && (
@@ -1770,6 +1771,7 @@ export function Transactions({
             subCategories={subCategories}
             tags={tags}
             transactions={transactions}
+            defaultAccountId={filterAccount !== "all" ? filterAccount : undefined}
           />
         )}
 
