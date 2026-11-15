@@ -1428,7 +1428,7 @@ export default function LandingPage({ onGoToLogin, isLoggedIn, onGoToApp }: Land
             </div>
             <h4 className="text-lg font-black text-slate-900 mb-2">Acesse sua Conta</h4>
             <p className="text-xs text-slate-600 leading-relaxed font-medium">
-              Entre com seu e-mail ou conta Google. O sistema funciona no navegador e pode ser instalado no celular com um clique.
+              Entre com seu e-mail e senha. O sistema funciona no navegador e pode ser instalado no celular com um clique.
             </p>
           </div>
 

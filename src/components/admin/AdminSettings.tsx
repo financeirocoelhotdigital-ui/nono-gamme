@@ -294,7 +294,7 @@ export default function AdminSettings({
               </label>
               <input
                 type="email"
-                placeholder="suporte@finassist.com"
+                placeholder="financeirocoelhotdigital@gmail.com"
                 value={suporteEmail}
                 onChange={(e) => setSuporteEmail(e.target.value)}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"

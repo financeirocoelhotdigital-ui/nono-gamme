@@ -115,8 +115,8 @@ function loadLocalSettings(): any {
     modoManutencao: false,
     mensagemManutencao: "O sistema está em manutenção rápida para melhorias. Voltamos em alguns minutos!",
     mensagemBoasVindasWhatsApp: "Olá {nome}! Seu acesso ao Bolso+ foi liberado com sucesso.\n\n*Seus dados de acesso:*\n📧 E-mail: {email}\n🔑 Senha: {senha}\n\n🔗 Acesse aqui: {link}",
-    suporteWhatsApp: "5511999999999",
-    suporteEmail: "suporte@finassist.com",
+    suporteWhatsApp: "",
+    suporteEmail: "financeirocoelhotdigital@gmail.com",
     permitirCadastros: true,
   };
   try {

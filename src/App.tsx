@@ -1,6 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense, useRef } from "react";
-import { auth, googleProvider, db, firebaseConfig, handleFirestoreError, OperationType } from "./lib/firebase";
-import { onAuthStateChanged, signInWithPopup, signOut, User, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { auth, db, firebaseConfig, handleFirestoreError, OperationType } from "./lib/firebase";
+import { onAuthStateChanged, signOut, User, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, getDocs, onSnapshot, query, where, orderBy, limit } from "firebase/firestore";
 import { UserProfile, Transaction, Account, Card, Goal, Debt, FamilyMember, Budget, Subscription, WealthItem, AIInsight, Document, Receivable, Debtor, Category, SubCategory, Tag } from "./types";
 import { Layout } from "./components/Layout";
@@ -919,21 +919,6 @@ function AppContent() {
     };
   }, [user]);
 
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error: any) {
-      console.error("Login failed", error);
-      if (error.code === "auth/popup-closed-by-user") {
-        mostrarMensagem("A janela de login foi fechada antes de concluir.");
-      } else if (error.code === "auth/popup-blocked") {
-        mostrarMensagem("O seu navegador bloqueou o pop-up de login. Por favor, autorize pop-ups para este site.");
-      } else {
-        mostrarMensagem("Erro ao tentar entrar com Google. Tente novamente.");
-      }
-    }
-  };
-
   const handleLogout = async () => {
     mostrarMensagem("Saindo da conta...");
     try {
@@ -963,7 +948,6 @@ function AppContent() {
     if (authView === "login" || location.pathname === "/login") {
       return (
         <Login 
-          onGoogleLogin={handleLogin}
           onEmailLogin={fazerLogin}
           debugMsg={debugMsg}
           onBackToLanding={() => {

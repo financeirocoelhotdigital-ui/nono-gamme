@@ -22,10 +22,20 @@ export interface SupportChannels {
   email: string;
 }
 
+const DEFAULT_SUPPORT_EMAIL = "financeirocoelhotdigital@gmail.com";
+
 const DEFAULT_CHANNELS: SupportChannels = {
-  whatsapp: "5511999999999",
-  email: "suporte@finassist.com",
+  whatsapp: "",
+  email: DEFAULT_SUPPORT_EMAIL,
 };
+
+function resolveSupportEmail(raw?: unknown): string {
+  const val = String(raw || "").trim();
+  if (!val || val.toLowerCase() === "suporte@finassist.com") {
+    return DEFAULT_SUPPORT_EMAIL;
+  }
+  return val;
+}
 
 const LOCAL_TICKETS_KEY = "finance_local_support_tickets_v1";
 
@@ -79,8 +89,8 @@ export async function fetchSupportChannels(): Promise<SupportChannels> {
       const data = await resp.json();
       if (data?.suporteWhatsApp || data?.suporteEmail) {
         return {
-          whatsapp: String(data.suporteWhatsApp || DEFAULT_CHANNELS.whatsapp).trim(),
-          email: String(data.suporteEmail || DEFAULT_CHANNELS.email).trim(),
+          whatsapp: String(data.suporteWhatsApp || "").trim(),
+          email: resolveSupportEmail(data.suporteEmail),
         };
       }
     }
@@ -93,8 +103,8 @@ export async function fetchSupportChannels(): Promise<SupportChannels> {
     if (snap.exists()) {
       const data = snap.data() as any;
       return {
-        whatsapp: String(data?.suporteWhatsApp || DEFAULT_CHANNELS.whatsapp).trim(),
-        email: String(data?.suporteEmail || DEFAULT_CHANNELS.email).trim(),
+        whatsapp: String(data?.suporteWhatsApp || "").trim(),
+        email: resolveSupportEmail(data?.suporteEmail),
       };
     }
   } catch {

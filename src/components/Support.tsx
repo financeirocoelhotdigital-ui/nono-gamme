@@ -7,15 +7,12 @@ import {
   ChevronDown,
   Clock,
   Copy,
-  ExternalLink,
   Headphones,
   HelpCircle,
   Mail,
-  MessageCircle,
   MessageSquarePlus,
   Search,
   Send,
-  ShieldCheck,
   XCircle,
 } from "lucide-react";
 import {
@@ -29,7 +26,6 @@ import {
   createSupportTicket,
   fetchSupportChannels,
   mergeAndSortTickets,
-  normalizeWhatsAppNumber,
   replyToSupportTicket,
   subscribeUserSupportTickets,
   SupportChannels,
@@ -101,8 +97,8 @@ const FAQ_ITEMS = [
     a: "Vá em Configurações > Dados > Exportar Dados. Será gerado um arquivo JSON criptografável com suas contas, transações, metas e histórico.",
   },
   {
-    q: "Qual o prazo de resposta do suporte humano?",
-    a: "Chamados abertos pelo sistema são respondidos em até 4 horas úteis. Para urgências de acesso ou assinatura, você também pode iniciar contato direto pelo WhatsApp oficial.",
+    q: "Qual o prazo de resposta do suporte?",
+    a: "Chamados abertos pelo sistema são respondidos em até 4 horas úteis. Caso prefira, entre em contato diretamente pelo e-mail financeirocoelhotdigital@gmail.com.",
   },
 ];
 
@@ -124,8 +120,8 @@ function formatDateTimePt(iso: string): string {
 export default function Support({ userProfile, mostrarMensagem }: SupportProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [channels, setChannels] = useState<SupportChannels>({
-    whatsapp: "5511999999999",
-    email: "suporte@finassist.com",
+    whatsapp: "",
+    email: "financeirocoelhotdigital@gmail.com",
   });
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
@@ -328,18 +324,11 @@ export default function Support({ userProfile, mostrarMensagem }: SupportProps) 
     }
   };
 
-  const whatsappClean = normalizeWhatsAppNumber(channels.whatsapp);
-  const whatsappPreText = encodeURIComponent(
-    `Olá equipe Bolso+! Preciso de suporte.\nUsuário: ${userProfile?.displayName || ""} (${userProfile?.email || ""})`
-  );
-  const whatsappUrl = whatsappClean
-    ? `https://wa.me/${whatsappClean}?text=${whatsappPreText}`
-    : "#";
-
+  const supportEmail = channels.email || "financeirocoelhotdigital@gmail.com";
   const mailtoSubject = encodeURIComponent(
     `[Suporte Bolso+] Solicitação de ${userProfile?.displayName || userProfile?.email || "Usuário"}`
   );
-  const mailtoUrl = `mailto:${channels.email}?subject=${mailtoSubject}`;
+  const mailtoUrl = `mailto:${supportEmail}?subject=${mailtoSubject}`;
 
   return (
     <div className="space-y-8 pb-24 max-w-6xl mx-auto">
@@ -375,85 +364,41 @@ export default function Support({ userProfile, mostrarMensagem }: SupportProps) 
         </button>
       </div>
 
-      {/* Direct Support Channels Strip */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4">
-          <div>
-            <div className="flex items-center justify-between text-xs text-slate-500 mb-1.5">
-              <span className="font-semibold text-slate-700">WhatsApp Oficial</span>
-              <MessageCircle size={16} className="text-emerald-600" />
-            </div>
-            <p className="text-sm font-mono font-semibold text-slate-900 tabular-nums">
-              +{whatsappClean || "5511999999999"}
+      {/* Direct Support Channel: Email Only */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-4 min-w-0">
+          <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center shrink-0">
+            <Mail size={20} />
+          </div>
+          <div className="min-w-0">
+            <span className="text-xs font-semibold text-slate-500 block">
+              E-mail de Suporte
+            </span>
+            <p className="text-base font-mono font-semibold text-slate-900 truncate">
+              {supportEmail}
             </p>
-            <p className="text-xs text-slate-500 mt-1">
-              Atendimento ágil para dúvidas de acesso e assinatura.
+            <p className="text-xs text-slate-500 mt-0.5">
+              Envie dúvidas, anexos, comprovantes ou solicitações diretamente para o nosso e-mail oficial.
             </p>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           <a
-            href={whatsappUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full py-2 px-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+            href={mailtoUrl}
+            className="py-2.5 px-4 bg-[#064E3B] hover:bg-emerald-900 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
           >
-            <span>Conversar no WhatsApp</span>
-            <ExternalLink size={14} />
+            <Mail size={14} />
+            <span>Enviar E-mail</span>
           </a>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4">
-          <div>
-            <div className="flex items-center justify-between text-xs text-slate-500 mb-1.5">
-              <span className="font-semibold text-slate-700">E-mail de Suporte</span>
-              <Mail size={16} className="text-slate-600" />
-            </div>
-            <p className="text-sm font-mono font-semibold text-slate-900 truncate">
-              {channels.email}
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
-              Envie anexos, comprovantes ou solicitações formais.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <a
-              href={mailtoUrl}
-              className="flex-1 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
-            >
-              <Mail size={14} />
-              <span>Enviar E-mail</span>
-            </a>
-            <button
-              type="button"
-              onClick={() => handleCopy(channels.email, "email", "E-mail do suporte")}
-              className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
-              title="Copiar e-mail do suporte"
-            >
-              {copiedKey === "email" ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-              <span>{copiedKey === "email" ? "Copiado" : "Copiar"}</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between gap-4">
-          <div>
-            <div className="flex items-center justify-between text-xs text-slate-500 mb-1.5">
-              <span className="font-semibold text-slate-700">Horário e SLA</span>
-              <ShieldCheck size={16} className="text-emerald-600" />
-            </div>
-            <p className="text-sm font-semibold text-slate-900 tabular-nums">
-              Seg a Sex · 08h às 19h
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
-              Chamados in-app ficam registrados com número de protocolo e histórico completo.
-            </p>
-          </div>
           <button
             type="button"
-            onClick={handleStartNewTicket}
-            className="w-full py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap cursor-pointer"
+            onClick={() => handleCopy(supportEmail, "email", "E-mail do suporte")}
+            className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
+            title="Copiar e-mail do suporte"
           >
-            <MessageSquarePlus size={14} />
-            <span>Abrir Chamado Interno</span>
+            {copiedKey === "email" ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+            <span>{copiedKey === "email" ? "Copiado" : "Copiar"}</span>
           </button>
         </div>
       </div>

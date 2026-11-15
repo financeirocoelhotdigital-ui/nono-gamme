@@ -4,20 +4,18 @@ import { motion } from "framer-motion";
 import { cn } from "../lib/utils";
 
 interface LoginProps {
-  onGoogleLogin: () => Promise<void>;
   onEmailLogin: (email: string, senha: string) => Promise<void> | void;
   debugMsg: string | null;
   onBackToLanding?: () => void;
 }
 
-export function Login({ onGoogleLogin, onEmailLogin, debugMsg, onBackToLanding }: LoginProps) {
+export function Login({ onEmailLogin, debugMsg, onBackToLanding }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isEmailFocused, setIsEmailFocused] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,15 +25,6 @@ export function Login({ onGoogleLogin, onEmailLogin, debugMsg, onBackToLanding }
       await onEmailLogin(email, password);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleGoogleClick = async () => {
-    setIsGoogleLoading(true);
-    try {
-      await onGoogleLogin();
-    } finally {
-      setIsGoogleLoading(false);
     }
   };
 
@@ -212,7 +201,7 @@ export function Login({ onGoogleLogin, onEmailLogin, debugMsg, onBackToLanding }
               Acessar Conta
             </h2>
             <p className="text-xs text-slate-500 font-medium">
-              Informe seu e-mail e senha ou entre com o Google.
+              Informe seu e-mail e senha para acessar sua conta.
             </p>
           </div>
 
@@ -297,7 +286,7 @@ export function Login({ onGoogleLogin, onEmailLogin, debugMsg, onBackToLanding }
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLoading || isGoogleLoading}
+              disabled={isLoading}
               className="w-full h-12 mt-2 bg-[#10B981] hover:bg-[#059669] text-white rounded-2xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
               {isLoading ? (
@@ -317,29 +306,6 @@ export function Login({ onGoogleLogin, onEmailLogin, debugMsg, onBackToLanding }
               Administrador: acesse com <strong className="text-slate-600">admin</strong> ou seu e-mail de gestor.
             </p>
           </form>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-6">
-            <div className="h-px bg-slate-100 flex-1" />
-            <span className="text-[11px] font-bold text-slate-400">ou</span>
-            <div className="h-px bg-slate-100 flex-1" />
-          </div>
-
-          {/* Google Button */}
-          <button
-            onClick={handleGoogleClick}
-            disabled={isLoading || isGoogleLoading}
-            className="w-full h-12 bg-white border border-slate-200 rounded-2xl flex items-center justify-center gap-3 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] transition-all disabled:opacity-70 shadow-sm"
-          >
-            {isGoogleLoading ? (
-              <div className="w-4 h-4 border-2 border-slate-400/30 border-t-slate-600 rounded-full animate-spin" />
-            ) : (
-              <>
-                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
-                Continuar com o Google
-              </>
-            )}
-          </button>
         </motion.div>
 
       </div>

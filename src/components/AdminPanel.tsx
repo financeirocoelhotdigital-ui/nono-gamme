@@ -94,8 +94,8 @@ export default function AdminPanel({ userProfile, onLogout, mostrarMensagem }: A
     modoManutencao: false,
     mensagemManutencao: "O sistema Bolso+ está em manutenção programada para melhorias. Voltaremos em breve!",
     permitirCadastros: true,
-    suporteWhatsApp: "5511999999999",
-    suporteEmail: "suporte@finassist.com",
+    suporteWhatsApp: "",
+    suporteEmail: "financeirocoelhotdigital@gmail.com",
     mensagemBoasVindasWhatsApp:
       "Olá {nome}!\n\nSeu acesso ao Bolso+ foi liberado com sucesso! 🎉\n\n🔑 *Seus dados de acesso:*\nE-mail: {email}\nSenha: {senha}\nPlano: {plano}\n\n👉 Acesse agora: {link}\n\nQualquer dúvida, estamos à disposição!",
   });
